@@ -4,6 +4,7 @@ const fs=require('node:fs'), assert=require('node:assert/strict');
 const uploadDuringRefresh=require('./upload-refresh.cjs');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1cAAAAASUVORK5CYII=','base64');
 const mp3=fs.readFileSync(__dirname+'/fixtures/tone.mp3');
+const m4a=fs.readFileSync(__dirname+'/fixtures/tone.m4a');
 const root='00000000-0000-4000-8000-000000000001';let sequence=1,revision=0;
 const users=new Map([[root,{id:root,email:'root@example.com',password:'root-password-123',aud:'authenticated',role:'authenticated'}]]);
 const profiles=new Map([['fuguang',{owner_id:root,updated_at:'2026-10-16T00:00:00Z',profile_data:{}}]]),editors=new Map(),attempts=new Map(),objects=new Map(),tokens=new Map();
@@ -54,6 +55,11 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
    const publicPrefix='/storage/v1/object/public/homepage-media/',privatePrefix='/storage/v1/object/homepage-media';
    if(url.pathname.startsWith(publicPrefix)){
     const item=objects.get(decodeURIComponent(url.pathname.slice(publicPrefix.length)));if(!item)return reply({message:'not found'},404);
+    if(req.headers().range) {
+     const [,startText,endText]=req.headers().range.match(/bytes=(\d+)-(\d*)/);
+     const start=Number(startText),end=Math.min(endText?Number(endText):item.body.length-1,item.body.length-1);
+     return route.fulfill({status:206,headers:{...headers,'content-type':item.type,'content-range':`bytes ${start}-${end}/${item.body.length}`},body:item.body.subarray(start,end+1)});
+    }
     return route.fulfill({headers:{...headers,'content-type':item.type},body:item.body});
    }
    if(req.method()==='POST'&&url.pathname.startsWith(privatePrefix+'/')){
@@ -85,6 +91,9 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   await p1.fill('#nameInput','一号专属资料');await p1.fill('#bioInput','一号的简介');await p1.fill('[data-preface="gallery"]','一号相册');await p1.click('#saveBtn');await saved(p1);
   await p1.locator('#avatarFile').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});await saved(p1);
   await p1.locator('#musicInput').setInputFiles({name:'bad.mp3',mimeType:'audio/mpeg',buffer:Buffer.from('not music')});await saved(p1);assert(!profiles.get('person_one').profile_data.media.some(x=>x.type==='music'));
+  const beforeMislabeled=objects.size;
+  await p1.locator('#musicInput').setInputFiles({name:'renamed.mp3',mimeType:'audio/mpeg',buffer:m4a});await saved(p1);
+  assert.match(await p1.locator('#toast').textContent(),/实际不是 MP3/);assert.equal(objects.size,beforeMislabeled);assert(!profiles.get('person_one').profile_data.media.some(x=>x.type==='music'));
   await uploadDuringRefresh(p1,{name:'music.mp3',mimeType:'application/octet-stream',buffer:mp3});await saved(p1);await p1.waitForFunction(()=>document.getElementById('profileAudio').readyState>=2);
   await p1.click('#editBtn');await p1.click('[data-tool="gallery"]');await p1.locator('#galleryInput').setInputFiles({name:'photo.png',mimeType:'image/png',buffer:png});await saved(p1);
   assert(profiles.get('person_one').profile_data.profile.avatar.includes('/person_one/'));assert.equal(profiles.get('person_one').profile_data.media.length,2);
@@ -93,9 +102,14 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   await unlock(p2,'two-password-123');await p2.fill('#nameInput','二号专属资料');await p2.click('#saveBtn');await saved(p2);
   assert.equal(profiles.get('person_one').profile_data.profile.name,'一号专属资料');assert.equal(profiles.get('person_two').profile_data.profile.name,'二号专属资料');assert.equal(profiles.get('fuguang').profile_data.profile,undefined);
   await p2.locator('#avatarFile').setInputFiles({name:'other.png',mimeType:'image/png',buffer:png});await saved(p2);
+  // Legacy AAC/M4A uploaded with an MP3 name and incorrect HTTP MIME type.
+  const legacyMusic=profiles.get('person_one').profile_data.media.find(x=>x.type==='music');delete legacyMusic.mimeType;
+  objects.set(legacyMusic.url.split('/homepage-media/')[1],{type:'audio/mpeg',body:m4a});
   // A fresh public visitor sees latest text, image, gallery and playable music.
   const visitorCtx=await context({viewport:{width:390,height:844},isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0'}),vp=await open(visitorCtx,'person_one');
   assert.equal(await vp.locator('#displayName').textContent(),'一号专属资料');assert.equal(await vp.locator('#displayBio').textContent(),'一号的简介');await vp.waitForFunction(()=>document.getElementById('profileAudio').readyState>=2);
+  assert(await vp.evaluate(()=>audio.src.startsWith('blob:')));
+  assert.equal(await vp.evaluate(async()=>(await (await fetch(audio.src)).blob()).type),'audio/mp4');
   await vp.locator('#cards .card').nth(1).click();await vp.waitForSelector('.gallery-tile img');await vp.locator('.gallery-tile img').click();assert(await vp.locator('#imageViewer').evaluate(x=>x.classList.contains('open')));
   assert(!await vp.locator('body').evaluate(b=>b.classList.contains('profile-unlocked')));
   await vp.locator('#closeViewer').click();await vp.locator('#detailClose').click();await vp.evaluate(()=>{audio.loop=true;audio.pause();autoplayPending=true;});await vp.locator('.music-play').click();await vp.waitForFunction(()=>!audio.paused&&audio.currentTime>0);await vp.evaluate(()=>audio.pause());
@@ -113,7 +127,7 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   const newCtx=await context(),np=await open(newCtx,'person_one');await unlock(np,newPassword);await np.fill('#nameInput','重置后仍可编辑');await np.click('#saveBtn');await saved(np);assert.equal(profiles.get('person_one').profile_data.profile.name,'重置后仍可编辑');
   // Export keeps the child namespace and removes password/admin service scripts.
   await np.click('#editBtn');const [download]=await Promise.all([np.waitForEvent('download'),np.click('#publishVisitor')]);
-  const snapshot=fs.readFileSync(await download.path(),'utf8');assert(!snapshot.includes('profile-access.js'));
+  const snapshot=fs.readFileSync(await download.path(),'utf8');assert(!snapshot.includes('profile-access.js'));assert(snapshot.includes('data:audio/mp4;base64,'));
   const sp=await newCtx.newPage();await sp.route('**/child-snapshot.html',r=>r.fulfill({contentType:'text/html',body:snapshot}));await sp.goto('http://127.0.0.1:8000/child-snapshot.html');
   assert.equal(await sp.locator('#displayName').textContent(),'重置后仍可编辑');await sp.close();
   // Missing child must not display the main profile's local draft.
@@ -124,6 +138,6 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   assert(profiles.get('person_two').deleted_at);assert(editors.get('person_two').purged_at);assert.deepEqual(profiles.get('person_two').profile_data,{});assert(![...objects.keys()].some(path=>path.startsWith('person_two/')));assert.deepEqual([...objects.keys()].filter(path=>path.startsWith('person_one/')),retainedFiles);
   const gone=await visitorCtx.newPage();await gone.goto('http://127.0.0.1:8000/?profile=person_two');await gone.waitForFunction(()=>document.getElementById('toast').textContent.includes('不存在或已删除'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: root creates two links; child MP3 waits for file-picker refresh; password-only child login; wrong-link password rejected; per-link sessions in one browser; isolated text/avatar/gallery/MP3 uploads; public playback/preview; root resets password; old session revoked; data/files preserved; child snapshot export; missing-link local draft isolation; public reads without SDK; one-tap manual music in mobile emulation; visible read-error retry; MIME inference/invalid-file rejection; deletion with scoped file cleanup. Real SDK + actual handler + mock services.');
+  console.log('PASS: root creates two links; child MP3 waits for file-picker refresh; password-only child login; wrong-link password rejected; per-link sessions in one browser; isolated text/avatar/gallery/MP3 uploads; public playback/preview; root resets password; old session revoked; data/files preserved; child snapshot export; missing-link local draft isolation; public reads without SDK; one-tap manual music in mobile emulation; visible read-error retry; MIME inference/invalid-file rejection; mislabeled M4A upload rejected before Storage write; legacy M4A with incorrect MP3 headers plays via correctly typed Blob and exports audio/mp4; deletion with scoped file cleanup. Real SDK + actual handler + mock services.');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1});

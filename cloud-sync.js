@@ -76,7 +76,7 @@ async function readCloudOnce() {
     if (!row || Array.isArray(row) || typeof row !== 'object') throw Error('云端返回的资料格式不正确');
     applyCloud(row); cloudReady = true;
     status('已读取最新云端资料');
-    await loadMusic();
+    void loadMusic();
     publicReadStatus.hidden=true;
   } catch(error) {
     cloudReady=false;
@@ -234,26 +234,76 @@ mediaAll = async function(type, includeFiles=false) {
   if(!includeFiles) return structuredClone(items);
   return Promise.all(items.map(async item => {
     const response = await fetch(item.url); if (!response.ok) throw Error('云端文件读取失败：' + response.status);
-    return {...item, file: await response.blob()};
+    const blob = await response.blob();
+    return {...item, file: item.type === 'music' ? await normalizeMusicBlob(blob) : blob};
   }));
 };
 mediaDelete = async function(id) {
   const saved = await cloudAction(() => { cloudMedia = cloudMedia.filter(x => x.id !== id); });
   if (!saved) throw Error('云端删除未完成');
 };
+// Some older uploads have an .mp3 name and audio/mpeg header but contain M4A.
+// A correctly typed Blob lets Safari decode those files without changing cloud data.
+async function detectedMusicMime(blob) {
+  const bytes = new Uint8Array(await blob.slice(0, 64).arrayBuffer());
+  const tag = (start, end) => String.fromCharCode(...bytes.slice(start, end));
+  if(tag(4, 8) === 'ftyp') return 'audio/mp4';
+  if(tag(0, 4) === 'OggS') return 'audio/ogg';
+  if(tag(0, 4) === 'fLaC') return 'audio/flac';
+  if(tag(0, 4) === 'RIFF') return 'audio/wav';
+  if(bytes[0] === 255 && (bytes[1] & 246) === 240) return 'audio/aac';
+  return 'audio/mpeg';
+}
+async function normalizeMusicBlob(blob) {
+  return new Blob([blob], {type:await detectedMusicMime(blob)});
+}
+let musicSource = null, musicGeneration = 0, musicFetch = null;
 loadMusic = async function() {
   activeMusic = cloudMedia.find(x => x.type === 'music') || null;
   const next = activeMusic?.url || '';
-  if ((audio.getAttribute('src') || '') !== next) {
-    audio.pause(); audio.removeAttribute('src');
-    if(next) audio.src = next;
-    audio.load();
-    if(next) void tryAutoplay();
+  const name = $('songName'); if(name) name.textContent = activeMusic?.name?.replace(/\.(mp3|m4a)$/i, '') || 'My Song';
+  if(musicSource === next) return;
+  musicSource = next;
+  const generation = ++musicGeneration;
+  if(musicFetch) musicFetch.abort();
+  const controller = new AbortController(); musicFetch = controller;
+  const timer = setTimeout(() => controller.abort(), 20000);
+  audio.pause(); audio.removeAttribute('src'); audio.load();
+  if(musicURL) { URL.revokeObjectURL(musicURL); musicURL = null; }
+  window.profileMusicPreparing = !!next; updatePlayButton();
+  try {
+    if(!next) return;
+    let source = next;
+    // Newly validated MP3 files can stream directly. Inspect legacy uploads once.
+    if(activeMusic.mimeType !== 'audio/mpeg') {
+      const response = await fetch(next, {headers:{Range:'bytes=0-63'}, signal:controller.signal});
+      if(!response.ok) throw Error('音乐读取失败：' + response.status);
+      const sample = await response.blob();
+      if(await detectedMusicMime(sample) !== 'audio/mpeg') {
+        const full = response.status === 200 ? sample : await (async () => {
+          const result = await fetch(next, {signal:controller.signal});
+          if(!result.ok) throw Error('音乐读取失败：' + result.status);
+          return result.blob();
+        })();
+        const blob = await normalizeMusicBlob(full);
+        if(generation !== musicGeneration) return;
+        musicURL = URL.createObjectURL(blob); source = musicURL;
+      }
+    }
+    if(generation !== musicGeneration) return;
+    audio.src = source; audio.load(); void tryAutoplay();
+  } catch(error) {
+    if(generation === musicGeneration) {
+      // Keep streaming available when a browser/network blocks the range probe.
+      audio.src = next; audio.load(); musicSource = null;
+    }
+  } finally {
+    clearTimeout(timer);
+    if(generation === musicGeneration) { window.profileMusicPreparing = false; updatePlayButton(); }
   }
-  const name = $('songName'); if(name) name.textContent = activeMusic?.name?.replace(/\.mp3$/i, '') || 'My Song';
-  updatePlayButton();
 };
 async function validateMusic(file) {
+  if(await detectedMusicMime(file) !== 'audio/mpeg') throw Error('文件实际不是 MP3，改后缀不能转换格式。请转换为真正的 MP3 后上传');
   const probe = document.createElement('audio');
   const url = URL.createObjectURL(new Blob([file],{type:'audio/mpeg'}));
   try {
@@ -272,7 +322,7 @@ musicFile.onchange = e => {
     await validateMusic(file);
     const url = await uploadFile(file);
     cloudMedia = cloudMedia.filter(x => x.type !== 'music');
-    cloudMedia.push({id: crypto.randomUUID(), type: 'music', name: file.name, url});
+    cloudMedia.push({id: crypto.randomUUID(), type: 'music', name: file.name, url, mimeType:'audio/mpeg'});
   }, loadMusic);
 };
 galleryFile.onchange = e => {
