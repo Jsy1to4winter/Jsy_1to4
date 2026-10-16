@@ -6,7 +6,7 @@
 
 **需要做一次后台升级，但不用把 HTML、图片、音乐重新上传到 Supabase。**
 
-- GitHub Pages 放网页文件。本版至少需要一起更新 `index.html`、`cloud-sync.js`、`profile-access.js`。
+- GitHub Pages 放网页文件。本版需要一起更新 `index.html`、`cloud-sync.js`、`profile-access.js`、`supabase-config.js` 和整个 `vendor` 目录。内置 Pages 工作流会自动复制这些文件。
 - Supabase 执行一次 `supabase/install.sql`，再部署 `profile-access` Edge Function。
 - 原 `fuguang` 主页、管理员账号和现有文件保留。使用者以后在网页内上传文件，无需自行操作 Supabase。
 
@@ -17,7 +17,7 @@
 3. 已有 `slug=fuguang` 且 `owner_id` 正确时无需改管理员邮箱；只有新项目没有此记录时，才把 `YOUR_ADMIN_EMAIL` 换成已有 Auth 管理员邮箱。不是密码。
 4. 到 Storage 确认出现公共桶 `homepage-media`。只有要公开展示的文件才应上传到此桶。
 
-`install.sql` 合并了旧 `setup.sql` 和新增 `multi-profile.sql`，可以重复执行，不清空原数据。如果已知旧版已安装，也可只执行 `multi-profile.sql`。若旧表缺少 `owner_id`、`slug` 唯一约束等，应先核对原表结构；不要删除旧表来解决报错。
+`install.sql` 合并了 `setup.sql`、`multi-profile.sql` 和删除功能迁移 `delete-profile.sql`，可以重复执行，不清空原数据。已经安装过多子链接版的项目，新增删除功能只需执行 `delete-profile.sql`，然后更新下方 Edge Function；重新执行完整 `install.sql` 也会保留现有资料。若旧表缺少 `owner_id`、`slug` 唯一约束等，应先核对原表结构；不要删除旧表来解决报错。
 
 ## 第二步：部署密码验证服务（必需）
 
@@ -45,7 +45,7 @@ supabase functions deploy profile-access --no-verify-jwt
 
 ## 第三步：GitHub Pages
 
-将本项目更新到仓库 `main`。在 GitHub Settings → Pages → Build and deployment 中，将 Source 选择为 **GitHub Actions**。仓库已包含 `.github/workflows/pages.yml`，仅发布网页所需的三个文件，不发布后台安装脚本。无需 npm install 或构建。
+将本项目更新到仓库 `main`。在 GitHub Settings → Pages → Build and deployment 中，将 Source 选择为 **GitHub Actions**。仓库已包含 `.github/workflows/pages.yml`，仅发布网页、配置与本地 SDK，不发布后台安装脚本。无需 npm install 或构建。
 
 进入 Actions → **Deploy homepage to GitHub Pages**，点击 **Run workflow**，选择 `main` 并运行。以后每次推送 `main` 会自动发布；首次切换发布来源后请手动运行一次。绿色成功后可在部署输出或 Settings → Pages 查看正式地址。
 
@@ -70,8 +70,18 @@ https://你的用户名.github.io/仓库名/?profile=p_某个独立编号
 3. 使用自动生成的编号与强密码，点击“创建子链接”。每份新资料从空白模板开始，不复制主站私人草稿、留言或媒体。
 4. 复制生成的链接与密码，交给对应的人，并自行妥善保管。这里不会保存可供查询的明文密码。
 5. 使用者打开子链接，点击锁或“编辑主页”，只输入对应密码即可编辑文字、留言，上传图片和音乐；其他人打开此链接只能浏览。
-6. 持有人保存后，新访客、刷新页面或页面重新获得焦点（且未打开编辑窗口）时可读取最新内容。
+6. 持有人保存后，新访客会直接读取无缓存的公开云端资料；刷新、返回页面或从后台恢复（且未打开编辑窗口）时也会刷新。读取失败会持续显示原因和“重新读取”按钮，不会把加载失败误报成空白资料。
 7. 密码忘记或需要撤销旧编辑权限时，在主站管理列表点击“重置密码”。资料和文件保留，旧密码及旧会话立即失去写入权限。请重新分发新密码。
+
+### 删除子链接
+
+主站登录 → 编辑主页 → 分发专属子链接 → 对应条目旁的“删除子链接”。确认前会显示编号及永久清空提示。
+
+删除会先停用链接，使公开读取、旧密码及已登录会话都失效；再删除该编号目录中的图片、音乐和未引用文件，清空文字与留言。其他子链接和主站不会受影响。为避免旧分享链接被分配给另一个人，系统保留最小停用记录和被禁用的身份，编号不再复用。
+
+如果文件清理遇到网络问题，链接仍保持停用，管理列表会提供“重试清理”。公共 CDN/浏览器已经缓存的文件可能仍暂时存在于缓存中。
+
+**已有多子链接版的升级顺序：**先在 SQL Editor 执行 `supabase/delete-profile.sql`，再将 Edge Function 替换为最新版 `supabase/profile-access-dashboard.ts`。在升级后台前，公开读取和音乐的前端修复可先随 Pages 发布生效，但删除入口暂不能使用。
 
 每个子链接使用独立的浏览器登录存储，避免同一设备打开多个子链接时串号。拥有密码就拥有该份资料的编辑权；不要把密码交给仅需浏览的人。
 
@@ -86,6 +96,16 @@ https://你的用户名.github.io/仓库名/?profile=p_某个独立编号
 - 原浏览器本地资料的备份、导入和媒体迁移只在主站提供，防止无意把主站旧数据导入其他人的子链接。不要在迁移前清除原浏览器数据。
 - “导出资料”保存完整 JSON（包含媒体 URL），不是独立媒体备份；“导入资料”兼容旧个人资料 JSON。“导出访客版 HTML”是固定只读快照，不会持续更新；对外持续同步请分发正常子链接。
 - 普通网页的前端代码本来就可被浏览器查看；密码、内部账号目录和后台密钥不在公开资料中。
+
+## 微信及音乐播放
+
+浏览器 SDK 已固定版本并放在 `vendor/supabase.js`，与网页同站点发布，不再从外部 CDN 获取。公开读取使用原生 fetch + Publishable Key，独立于 SDK、编辑登录和刷新令牌锁；认证和所有写入仍使用 SDK 与服务端权限。
+
+`supabase-config.js` 保存公开项目 URL、Publishable Key 和子链接选择逻辑；不要在这里填写 Secret Key 或 service_role Key。修改网页文件请一起发布，微信缓存旧页面时可从右上角菜单刷新，或用系统浏览器打开同一链接对照。
+
+iPhone 微信可能阻止有声音的自动播放，需点击音乐旁的 ▶；手动播放不应被自动播放补偿逻辑再次暂停。切换页面回来、资料未改变时不会重复清空音乐源。上传 MP3 时会先检查浏览器能否解码，手机文件没有 MIME 类型或为通用二进制类型时，会按有效 MP3 处理；错误文件会明确提示，不会保存成一个无法播放的云端记录。
+
+本任务验证了 Chromium 手机视口/触摸模拟及播放行为，没有真实 iPhone/安卓微信设备；WebKit 引擎下载被环境网络策略拒绝，未完成真实 WebKit 测试。仍需用实际微信打开同一子链接复测读取、上传和点击播放。
 
 ## 权限与密码实现
 

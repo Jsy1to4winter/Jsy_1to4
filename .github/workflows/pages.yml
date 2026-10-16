@@ -26,8 +26,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Prepare static site
         run: |
-          mkdir -p _site
-          cp index.html cloud-sync.js profile-access.js _site/
+          mkdir -p _site/vendor
+          cp index.html cloud-sync.js profile-access.js supabase-config.js _site/
+          cp vendor/supabase.js vendor/SUPABASE-LICENSE _site/vendor/
           touch _site/.nojekyll
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

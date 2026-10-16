@@ -2,7 +2,6 @@
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || '/tmp/homepage-validation/node_modules/playwright');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
-const sdk = fs.readFileSync(process.env.SUPABASE_SDK || '/tmp/homepage-validation/supabase.js');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1cAAAAASUVORK5CYII=', 'base64');
 const legacyAvatar = 'data:image/png;base64,'+png.toString('base64');
 const mp3 = fs.readFileSync(__dirname+'/fixtures/tone.mp3');
@@ -14,7 +13,7 @@ const token = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('bas
 const user = {id:owner,aud:'authenticated',role:'authenticated',email:'admin@example.com'};
 async function context(browser) {
   const ctx = await browser.newContext();
-  await ctx.route('https://cdn.jsdelivr.net/**', route => route.fulfill({contentType:'application/javascript',body:sdk}));
+  await ctx.route('https://cdn.jsdelivr.net/**', route => route.abort());
   await ctx.route('https://nedsvrzbsrethlyyoqey.supabase.co/**', async route => {
     const req = route.request(), url = new URL(req.url());
     const headers = {'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-expose-headers':'*','content-type':'application/json'};
@@ -114,7 +113,7 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     const beforeWrites=writes;await vp.evaluate(()=>cloudAction(()=>{data.name='visitor attempt';}));assert.equal(writes,beforeWrites);
     await vp.locator('#cards .card').nth(2).click();await vp.waitForSelector('.editable-preface p');assert.equal(await vp.locator('.editable-preface p').textContent(),'同步experience');
     const downloadWait=page.waitForEvent('download');await page.click('#publishVisitor');const download=await downloadWait;
-    const snapshot=fs.readFileSync(await download.path(),'utf8');assert(!snapshot.includes('<script src="cloud-sync.js"></script>'));
+    const snapshot=fs.readFileSync(await download.path(),'utf8');assert(!snapshot.includes('cloud-sync.js'));
     const sp=await ctx.newPage();await sp.route('**/snapshot.html',r=>r.fulfill({contentType:'text/html',body:snapshot}));
     const exportErrors=[];sp.on('pageerror',e=>exportErrors.push(e.message));await sp.goto('http://127.0.0.1:8000/snapshot.html');
     assert.equal(await sp.locator('#displayName').textContent(),'同步昵称');assert.deepEqual(exportErrors,[]);await sp.close();

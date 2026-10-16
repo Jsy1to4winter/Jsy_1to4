@@ -69,13 +69,8 @@ body{background:#e8e9eb}.page{background:linear-gradient(160deg,#f5f5f6,#eeeff1 
 <body>
 <main class="page"><header class="top"><div class="avatar-wrap"><img id="avatar" class="avatar" alt="头像" title="点击更换头像"><button class="plus" id="avatarPlus" aria-label="更换头像">+</button><input type="file" id="avatarFile" accept="image/*"></div><div class="stats"><div class="stat"><strong id="postCount">06</strong><span>帖子</span></div><div class="stat"><strong id="fanCount">128</strong><span>粉丝</span></div><div class="stat"><strong id="followCount">32</strong><span>关注</span></div></div></header><h1 class="name" id="displayName"></h1><div class="bio" id="displayBio"></div><div id="homeMusic" class="home-music"></div><div class="tags" id="tags"></div><div class="actions"><button class="btn" id="editBtn">编辑主页</button><button class="btn" id="shareBtn">分享主页</button><button class="btn small" id="contactBtn" title="联系我">✉</button></div><h2 class="section-title">关于用户</h2><div class="cards" id="cards"></div></main>
 <div class="editor" id="modal" role="dialog" aria-modal="true"><div class="panel"><h2>编辑个人主页</h2><label class="field">昵称<input id="nameInput"></label><label class="field">个人简介<textarea id="bioInput"></textarea></label><label class="field">标签（用逗号隔开）<input id="tagsInput"></label><label class="field">帖子数<input id="postsInput" type="number" min="0"></label><label class="field">粉丝数<input id="fansInput" type="number" min="0"></label><label class="field">关注数<input id="followingInput" type="number" min="0"></label><label class="field">联系邮箱<input id="emailInput" type="email"></label><div id="cardInputs"></div><p class="hint">点击卡片可以展开查看详情。内容保存到云端后，其他设备访问主页即可看到更新。</p><div class="row"><button class="btn" id="exportBtn">导出资料</button><button class="btn" id="importBtn">导入资料</button><input type="file" id="importFile" accept="application/json"></div><div class="row"><button class="btn" id="cancelBtn">取消</button><button class="btn" id="saveBtn" style="background:#25272d;color:#fff">保存修改</button></div></div></div><div class="editor" id="detailModal"><div class="panel"><h2 id="detailTitle"></h2><p id="detailText" style="white-space:pre-wrap;line-height:1.9"></p><button class="btn" id="detailClose">返回主页</button></div></div><div class="editor" id="aboutEditor" role="dialog" aria-modal="true"><div class="panel"><h2>编辑「关于我」</h2><p class="hint">仅展示一段介绍：左侧一张图片，右侧标题与四至五行文字。</p><div id="aboutFields"></div><div class="row"><button class="btn" id="cancelAbout">取消</button><button class="btn" id="saveAbout" style="background:#25272d;color:white">保存介绍</button></div></div></div><input type="file" id="aboutImageFile" accept="image/*" style="display:none"><input type="file" id="galleryInput" accept="image/*" multiple hidden><input type="file" id="musicInput" accept="audio/mpeg,audio/mp3,.mp3" hidden><audio id="profileAudio" preload="metadata"></audio><div class="toast" id="toast"></div><div class="editor" id="imageViewer" role="dialog" aria-modal="true"><div class="image-viewer-box"><button id="closeViewer" class="viewer-close" aria-label="关闭">×</button><img id="viewerImage" alt="放大查看图片"></div></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script id="supabase-config">
-const SUPABASE_URL='https://nedsvrzbsrethlyyoqey.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY='sb_publishable_kc6Gyp_6GY0VoCeL3iQ4GA_EtDhQF10';
-const PROFILE_SLUG=new URLSearchParams(location.search).get('profile') ?? 'fuguang';
-const profileSupabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{storageKey:'homepage-auth:'+encodeURIComponent(PROFILE_SLUG)}});
-</script>
+<script data-cloud src="vendor/supabase.js?v=2.118.0"></script>
+<script data-cloud src="supabase-config.js?v=20261016-3"></script>
 <script>
 // 初始资料：可以直接在这里修改文字。也可以点击网页上的“编辑主页”。
 const defaults={name:'个人主页',bio:'在这里写下你的个人简介。',tags:[],posts:0,fans:0,following:0,email:'',avatar:'',cards:[{icon:'✦',title:'关于我',summary:'点击了解我的个人介绍',detail:'这里可以写你的经历、性格和个人故事。'},{icon:'♡',title:'兴趣爱好',summary:'记录我喜欢的一切',detail:'这里可以介绍喜欢的音乐、电影、游戏和日常。'},{icon:'◈',title:'我的经历',summary:'一些值得分享的故事',detail:'这里可以填写学习、工作和生活经历。'},{icon:'✉',title:'联系我',summary:'期待与你交流',detail:'这里可以写联系方式或想对来访者说的话。'}]};
@@ -103,7 +98,7 @@ const aboutModal=$('aboutEditor'),aboutFile=$('aboutImageFile'),musicFile=$('mus
 let musicURL=null,activeMusic=null;
 function detailArea(title){const existing=$('detailTitle').closest('.detail-top');if(existing){existing.parentElement.insertBefore($('detailTitle'),existing);existing.remove()}$('detailTitle').textContent=title;$('detailText').style.display='none';let area=$('enhancedArea');if(!area){area=document.createElement('div');area.id='enhancedArea';$('detailText').after(area)}area.replaceChildren();$('detailModal').classList.add('open');return area}
 function imageButton(){const b=document.createElement('button');b.className='about-photo';b.type='button';b.title='点击添加或更换图片';if(about.image){const im=document.createElement('img');im.src=about.image;im.alt='关于我的照片';b.append(im)}else{b.innerHTML='<span style="font-size:24px">＋</span><span>添加图片</span>'}b.onclick=()=>aboutFile.click();return b}
-function makeMusicHeader(){const wrap=document.createElement('div');wrap.className='music-control';const name=document.createElement('span');name.className='music-name';name.id='songName';name.textContent=activeMusic?.name?.replace(/\.mp3$/i,'')||'My Song';const play=document.createElement('button');play.className='music-play';play.title='播放 / 暂停';play.textContent=audio.paused?'▶':'Ⅱ';play.onclick=async()=>{if(!audio.src){toast('请先上传 MP3 音乐');musicFile.click();return}if(audio.paused){try{await audio.play();play.textContent='Ⅱ'}catch{toast('播放失败，请重新上传 MP3')}}else{audio.pause();play.textContent='▶'}};audio.onended=()=>play.textContent='▶';const upload=document.createElement('button');upload.className='music-upload';upload.title='上传 MP3';upload.textContent='＋';upload.onclick=()=>musicFile.click();wrap.append(name,play,upload);return wrap}
+function makeMusicHeader(){const wrap=document.createElement('div');wrap.className='music-control';const name=document.createElement('span');name.className='music-name';name.id='songName';name.textContent=activeMusic?.name?.replace(/\.mp3$/i,'')||'My Song';const play=document.createElement('button');play.className='music-play';play.title='播放 / 暂停';play.textContent=audio.paused?'▶':'Ⅱ';play.onclick=async()=>{if(!audio.getAttribute('src')){toast('此主页尚未设置音乐');return}if(audio.paused){try{await audio.play();play.textContent='Ⅱ'}catch(error){toast(error.name==='NotAllowedError'?'请再次点击播放按钮，允许浏览器播放音乐':'音乐播放失败，请检查文件是否为有效 MP3 或稍后重试')}}else{audio.pause();play.textContent='▶'}};audio.onended=()=>play.textContent='▶';const upload=document.createElement('button');upload.className='music-upload';upload.title='上传 MP3';upload.textContent='＋';upload.onclick=()=>musicFile.click();wrap.append(name,play,upload);return wrap}
 async function loadMusic(){try{const items=await mediaAll('music');activeMusic=items[0]||null;if(musicURL)URL.revokeObjectURL(musicURL);musicURL=activeMusic?URL.createObjectURL(activeMusic.file):null;audio.pause();audio.removeAttribute('src');if(musicURL)audio.src=musicURL;const n=$('songName');if(n)n.textContent=activeMusic?.name?.replace(/\.mp3$/i,'')||'My Song';if(musicURL)tryAutoplay()}catch{toast('当前浏览器无法读取音乐存储')}}
 
 // 浏览器可能阻止带声音的自动播放；首次点击页面时再尝试一次。
@@ -116,7 +111,7 @@ async function tryAutoplay(){
 function updatePlayButton(){const b=document.querySelector('#homeMusic .music-play');if(b)b.textContent=audio.paused?'▶':'Ⅱ'}
 audio.addEventListener('play',updatePlayButton);
 audio.addEventListener('pause',updatePlayButton);
-document.addEventListener('pointerdown',()=>{if(autoplayPending&&audio.paused){autoplayPending=false;tryAutoplay()}},{capture:true});
+document.addEventListener('pointerdown',e=>{if(e.target.closest?.('.music-play'))return;if(autoplayPending&&audio.paused){autoplayPending=false;tryAutoplay()}},{capture:true});
 
 function showAbout(){const area=detailArea('关于我');const row=document.createElement('div');row.className='about-block';const copy=document.createElement('div');copy.className='about-copy';const h=document.createElement('h3');h.textContent=about.title;const p=document.createElement('p');p.textContent=about.text;copy.append(h,p);row.append(imageButton(),copy);area.append(row);const actions=document.createElement('div');actions.className='about-edit';const note=document.createElement('span');note.className='hint';note.textContent='点击左侧图片框上传照片';const edit=document.createElement('button');edit.textContent='✎ 编辑介绍';edit.onclick=()=>{ $('detailModal').classList.remove('open');openAboutEditor()};actions.append(note,edit);area.append(actions)}
 function openAboutEditor(){$('aboutFields').replaceChildren();const item=document.createElement('div');item.className='about-editor-item';item.innerHTML='<label class="field">介绍标题<input id="aboutTitleInput"></label><label class="field">介绍正文（建议四至五行）<textarea id="aboutTextInput" style="min-height:170px"></textarea></label>';$('aboutFields').append(item);$('aboutTitleInput').value=about.title;$('aboutTextInput').value=about.text;aboutModal.classList.add('open')}
@@ -246,7 +241,7 @@ const v5PriorRender=render;render=function(){v5PriorRender();const cards=documen
  btn.onclick=async()=>{
   btn.disabled=true;btn.textContent='正在打包图片和音乐…';
   try{
-   const all=await Promise.all(['gallery','experience','contact','music'].map(t=>mediaAll(t)));
+   const all=await Promise.all(['gallery','experience','contact','music'].map(t=>mediaAll(t,true)));
    const media=[];
    for(const list of all)for(const item of list){media.push({id:item.id,type:item.type,name:item.name,fileData:await readAsDataURL(item.file)})}
    const state={
@@ -258,12 +253,12 @@ const v5PriorRender=render;render=function(){v5PriorRender();const cards=documen
    state[aboutKey]=JSON.stringify([about]);
    const response=await fetch(location.href);if(!response.ok)throw Error('无法读取页面源文件');
    let html=await response.text();
-   html=html.replace(/<style id="owner-export-style">[\s\S]*?<\/style>/,'').replace(/<script id="owner-export-script">[\s\S]*?<\/script>/,'');
-   html=html.replace(/<script src="cloud-sync.js"><\/script>/,'').replace(/<script src="profile-access.js"><\/script>/,'').replace(/<script id="v18-lock-script">[\s\S]*?<\/script>/,'');
-   html=html.replace("const PROFILE_SLUG=new URLSearchParams(location.search).get('profile') ?? 'fuguang';", 'const PROFILE_SLUG='+JSON.stringify(PROFILE_SLUG)+';');
+   const source=new DOMParser().parseFromString(html,'text/html');
+   source.querySelectorAll('script[data-cloud],#owner-export-style,#owner-export-script,#v18-lock-script').forEach(el=>el.remove());
+   html='<!DOCTYPE html>\n'+source.documentElement.outerHTML;
    html=html.replaceAll('localStorage.getItem(', 'window.__visitorGetItem(');
    html=html.replace('async function mediaAll(type){','async function mediaAll(type){if(window.__visitorMedia){return Promise.all(window.__visitorMedia.filter(x=>x.type===type).map(async x=>({id:x.id,type:x.type,name:x.name,file:await (await fetch(x.fileData)).blob()})))}');
-   const boot=`<script id="visitor-embedded">window.__visitorState=${JSON.stringify(state).replace(/</g,'\\u003c')};window.__visitorMedia=${JSON.stringify(media).replace(/</g,'\\u003c')};window.__visitorGetItem=function(k){return Object.prototype.hasOwnProperty.call(window.__visitorState,k)?window.__visitorState[k]:null};<\/script>`;
+   const boot=`<script id="visitor-embedded">window.PROFILE_SLUG=${JSON.stringify(PROFILE_SLUG)};window.__visitorState=${JSON.stringify(state).replace(/</g,'\\u003c')};window.__visitorMedia=${JSON.stringify(media).replace(/</g,'\\u003c')};window.__visitorGetItem=function(k){return Object.prototype.hasOwnProperty.call(window.__visitorState,k)?window.__visitorState[k]:null};<\/script>`;
    html=html.replace('<head>','<head>'+boot);
    const guard=`<style id="visitor-guard-style">#avatarPlus,.avatar-wrap .plus,.gallery-add,.gallery-delete,.mini-edit,.about-edit,.music-upload,#commentManager,#aboutEditor,#modal,#avatarFile,#galleryInput,#aboutImageFile,#musicInput{display:none!important}#editBtn{opacity:1!important;cursor:default!important}#avatar{cursor:default!important}.about-photo{cursor:default!important}</style><script id="visitor-guard-script">(function(){function lock(){const b=document.getElementById('editBtn');if(b){b.onclick=function(e){e.preventDefault()};b.title='访客展示模式';}const av=document.getElementById('avatar');if(av)av.onclick=null;const plus=document.getElementById('avatarPlus');if(plus)plus.onclick=null;const oldShowAbout=window.showAbout;if(oldShowAbout)window.showAbout=function(){oldShowAbout();document.querySelectorAll('.about-photo').forEach(b=>b.onclick=null)};const oldSection=window.showSection;if(oldSection)window.showSection=async function(s){await oldSection(s);document.querySelectorAll('.gallery-delete,.gallery-add,.mini-edit').forEach(b=>b.remove())};const oldMusic=window.makeMusicHeader;if(oldMusic)window.makeMusicHeader=function(){const w=oldMusic();w.querySelectorAll('.music-upload').forEach(b=>b.remove());return w};const oldImage=window.imageButton;if(oldImage)window.imageButton=function(){const b=oldImage();b.onclick=null;return b};}loadMusic();lock()})();<\/script>`;
    html=html.replace('</body>',guard+'</body>');
@@ -377,8 +372,8 @@ body:not(.profile-unlocked) #avatarPlus,body:not(.profile-unlocked) .avatar-wrap
 body:not(.profile-unlocked) #avatar{cursor:default}
 </style>
 <div class="editor" id="lockDialog" role="dialog" aria-modal="true" aria-label="主页编辑解锁"><div class="panel"><h2 id="lockHeading" style="margin:0">解锁编辑权限</h2><p class="lock-subtitle" id="lockDescription">输入此主页的编辑密码，才能修改资料。</p><input class="lock-field" id="lockEmail" type="email" placeholder="管理员登录邮箱" autocomplete="username"><input class="lock-field" id="lockPassword" type="password" placeholder="请输入编辑密码" autocomplete="off"><div class="lock-error" id="lockError"></div><div class="lock-buttons"><button type="button" id="lockCancel">取消</button><button type="button" id="unlockSubmit">确认解锁</button></div></div></div>
-<script src="profile-access.js"></script>
-<script src="cloud-sync.js"></script>
+<script data-cloud src="profile-access.js?v=20261016-3"></script>
+<script data-cloud src="cloud-sync.js?v=20261016-3"></script>
 <script id="v18-lock-script">
 (function(){
 // Supabase Auth 安全登录；不再使用写在 HTML 中的演示密码。
@@ -410,7 +405,7 @@ for(const id of ['avatar','avatarPlus']){const el=$id(id);if(el)el.addEventListe
 // 禁止锁定状态下通过旧版编辑入口触发修改。
 document.addEventListener('click',e=>{if(unlocked)return;const edit=e.target.closest('#homeIntroEdit,.intro-edit,.about-edit,.mini-edit,.gallery-add,.gallery-delete,.music-upload');if(edit){e.preventDefault();e.stopImmediatePropagation();showLock()}},true);
 refresh();
-profileSupabase.auth.onAuthStateChange(()=>{setTimeout(async()=>{unlocked=await window.cloudCanEdit();refresh()},0)});
+if(profileSupabase) profileSupabase.auth.onAuthStateChange(()=>{setTimeout(async()=>{unlocked=await window.cloudCanEdit();refresh()},0)});
 setTimeout(async()=>{unlocked=await window.cloudCanEdit();refresh()},0);
 })();
 </script>

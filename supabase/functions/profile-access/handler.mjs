@@ -12,16 +12,16 @@ export function createHandler({createClient, env, crypto = globalThis.crypto, lo
       let body; try { body=JSON.parse(text); } catch { return reply({error:'请求格式不正确'},400); }
       if (!body || Array.isArray(body) || typeof body !== 'object') return reply({error:'请求格式不正确'},400);
       const {action,slug,password}=body;
-      if (!['unlock','list','create','reset'].includes(action)) return reply({error:'操作不支持'},400);
+      if (!['unlock','list','create','reset','delete'].includes(action)) return reply({error:'操作不支持'},400);
       const url=env.get('SUPABASE_URL'), publicKey=env.get('SUPABASE_ANON_KEY'), serviceKey=env.get('SUPABASE_SERVICE_ROLE_KEY');
       if (!url || !publicKey || !serviceKey) throw Error('Backend environment is incomplete');
       admin=createClient(url,serviceKey,{auth:{persistSession:false,autoRefreshToken:false}});
       if (action !== 'list' && (typeof slug!=='string' || !/^[a-z0-9][a-z0-9_-]{2,63}$/.test(slug))) return reply({error:'子链接编号格式不正确'},400);
       if (action === 'unlock') {
         if(typeof password!=='string' || !password || password.length>128) return reply({error:'链接或密码不正确'},401);
-        const {data:editor,error:lookupError}=await admin.from('homepage_editors').select('login_email').eq('slug',slug).maybeSingle();
+        const {data:editor,error:lookupError}=await admin.from('homepage_editors').select('login_email,deleted_at').eq('slug',slug).maybeSingle();
         if(lookupError) throw lookupError;
-        if(!editor || typeof editor.login_email!=='string') return reply({error:'链接或密码不正确'},401);
+        if(!editor || editor.deleted_at || typeof editor.login_email!=='string') return reply({error:'链接或密码不正确'},401);
         const {data:allowed,error:limitError}=await admin.rpc('homepage_take_login_attempt',{p_slug:slug});
         if(limitError) throw limitError;
         if(!allowed) return reply({error:'尝试次数过多，请在 15 分钟后重试'},429);
@@ -38,14 +38,50 @@ export function createHandler({createClient, env, crypto = globalThis.crypto, lo
       if(permissionError) throw permissionError;
       if(!permission) return reply({error:'仅主站管理员可分发或重置子链接'},403);
       if(action==='list') {
-        const {data,error}=await admin.from('homepage_editors').select('slug,created_at').order('created_at',{ascending:false});
+        const {data,error}=await admin.from('homepage_editors').select('slug,created_at,deleted_at,purged_at').order('created_at',{ascending:false});
         if(error) throw error;
-        return reply({profiles:data});
+        return reply({profiles:(data || []).filter(item => !item.purged_at)});
       }
-      if(slug==='fuguang') return reply({error:'主站管理员继续使用原有邮箱密码登录'},400);
-      if(typeof password!=='string' || password.length<12 || password.length>64 || new TextEncoder().encode(password).length>72) return reply({error:'密码须为 12–64 个字符且 UTF-8 长度不超过 72 字节'},400);
-      const {data:existing,error:readError}=await admin.from('homepage_editors').select('user_id').eq('slug',slug).maybeSingle();
+      if(slug==='fuguang') return reply({error:action==='delete'?'主站不能删除':'主站管理员继续使用原有邮箱密码登录'},400);
+      if(action !== 'delete' && (typeof password!=='string' || password.length<12 || password.length>64 || new TextEncoder().encode(password).length>72)) return reply({error:'密码须为 12–64 个字符且 UTF-8 长度不超过 72 字节'},400);
+      const {data:existing,error:readError}=await admin.from('homepage_editors').select('user_id,deleted_at,purged_at').eq('slug',slug).maybeSingle();
       if(readError) throw readError;
+      if(action === 'delete') {
+        if(!existing) return reply({slug,deleted:true});
+        if(!existing.purged_at) {
+          const {data:disabledUser,error:disableError}=await admin.rpc('homepage_disable_editor',{p_slug:slug});
+          if(disableError) throw disableError;
+          if(typeof disabledUser!=='string') throw Error('Profile could not be disabled');
+          // Virtual folders disappear when their last file is removed. Always
+          // list the first page again after deletion, so no files are skipped.
+          const bucket=admin.storage.from('homepage-media');
+          async function removeFolder(prefix, depth=0) {
+            if(depth>8) throw Error('Storage directory nesting exceeds limit');
+            for(let batch=0;batch<100;batch++) {
+              const {data:items,error:listError}=await bucket.list(prefix,{limit:100,offset:0});
+              if(listError) throw listError;
+              if(!items?.length) return;
+              const files=[];
+              for(const item of items) {
+                if(typeof item.name!=='string' || /[\/]/.test(item.name) || item.name==='.' || item.name==='..') throw Error('Unexpected Storage object name');
+                const path=prefix+'/'+item.name;
+                if(item.id===null) await removeFolder(path,depth+1); else files.push(path);
+              }
+              if(files.length) {const {error:removeError}=await bucket.remove(files);if(removeError) throw removeError;}
+            }
+            throw Error('Storage cleanup incomplete; retry deletion');
+          }
+          await removeFolder(slug);
+          const {error:purgeError}=await admin.rpc('homepage_purge_editor',{p_slug:slug,p_expected_user:disabledUser});
+          if(purgeError) throw purgeError;
+          // The tombstone retains its Auth UUID to reserve the old URL. Ban the
+          // identity as an extra guard; RLS and login denial already revoked it.
+          const {error:banError}=await admin.auth.admin.updateUserById(disabledUser,{ban_duration:'876000h'}).catch(()=>({error:true}));
+          if(banError) logger.warn('Deleted profile identity ban failed; RLS still blocks writes');
+        }
+        return reply({slug,deleted:true});
+      }
+      if(existing?.deleted_at) return reply({error:'此编号已删除，不能重新分配，请使用其他编号'},409);
       const previousUser=existing && typeof existing.user_id==='string' ? existing.user_id : null;
       if(action==='create' && existing) return reply({error:'此子链接已存在，请使用其他编号'},409);
       if(action==='reset' && !previousUser) return reply({error:'子链接不存在'},404);
@@ -58,7 +94,7 @@ export function createHandler({createClient, env, crypto = globalThis.crypto, lo
       if(saveError) throw saveError;
       orphanUser=null; // Database now owns the identity; do not delete on a later error.
       if(action==='reset' && previousUser) {
-        const {error:deleteError}=await admin.auth.admin.deleteUser(previousUser);
+        const {error:deleteError}=await admin.auth.admin.deleteUser(previousUser).catch(()=>({error:true}));
         if(deleteError) logger.warn('Old editor identity cleanup failed'); // RLS already revoked access.
       }
       return reply({slug});
@@ -68,7 +104,7 @@ export function createHandler({createClient, env, crypto = globalThis.crypto, lo
       }
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BackendError';
       logger.error('profile-access failed',code);
-      return reply({error:'服务配置或操作失败，请确认已执行 multi-profile.sql 并检查 Edge Function 日志'},500);
+      return reply({error:'操作未完成，请确认已执行最新 install.sql 并更新函数；删除失败时可点击重试清理。详情请查看函数日志。'},500);
     }
   };
 }

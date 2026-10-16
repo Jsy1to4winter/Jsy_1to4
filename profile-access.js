@@ -2,6 +2,7 @@
 'use strict';
 const IS_CHILD_PROFILE = PROFILE_SLUG !== 'fuguang';
 window.profileAccessRequest = async function(action, values = {}) {
+  window.profileClientReady?.();
   const headers = {'Content-Type':'application/json', apikey:SUPABASE_PUBLISHABLE_KEY};
   if (action !== 'unlock') {
     const {data:{session}} = await profileSupabase.auth.getSession();
@@ -16,6 +17,7 @@ window.profileAccessRequest = async function(action, values = {}) {
   return result;
 };
 window.profileLogin = async function(email, password) {
+  window.profileClientReady?.();
   if(!IS_CHILD_PROFILE) {
     const {error} = await profileSupabase.auth.signInWithPassword({email,password});
     if(error) throw error;
@@ -70,7 +72,17 @@ window.profileAccessRefresh = function(canEdit) {
           showResult(item.slug,password);$('distributionStatus').textContent='密码已重置，请保存并重新分发。';
         });
       };
-      row.append(a,reset);$('childLinkList').append(row);
+      const remove=document.createElement('button');remove.type='button';remove.className='btn small';remove.textContent=item.deleted_at?'重试清理':'删除子链接';
+      remove.onclick=()=>{
+        if(!confirm('确定删除 '+item.slug+'？文字、留言、图片和音乐将被永久清空，旧链接及密码失效，编号不能再使用。此操作无法恢复。'))return;
+        void operation(async()=>{
+          await window.profileAccessRequest('delete',{slug:item.slug});
+          await refreshList();$('distributionStatus').textContent='子链接已删除，原链接和密码已失效。';
+        });
+      };
+      if(item.deleted_at) {const text=document.createElement('span');text.textContent=item.slug+'（已停用，待清理）';row.append(text,remove);}
+      else row.append(a,reset,remove);
+      $('childLinkList').append(row);
     }
   }
   button.onclick=()=>{

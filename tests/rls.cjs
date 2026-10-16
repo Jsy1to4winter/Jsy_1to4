@@ -48,6 +48,7 @@ const owner='00000000-0000-4000-8000-000000000001', other='00000000-0000-4000-80
  await db.exec('reset role');
  const multi=fs.readFileSync(__dirname+'/../supabase/multi-profile.sql','utf8');
  await db.exec(multi);await db.exec(multi);
+ const deletion=fs.readFileSync(__dirname+'/../supabase/delete-profile.sql','utf8');await db.exec(deletion);await db.exec(deletion);
  await role('anon');await denied('select * from public.homepage_editors');
  await denied('select * from public.homepage_admins');
  await denied("select public.homepage_take_login_attempt('child_one')");
@@ -80,6 +81,19 @@ const owner='00000000-0000-4000-8000-000000000001', other='00000000-0000-4000-80
  assert.equal((await db.query("update public.homepage_profiles set profile_data=profile_data where slug='child_one' returning slug")).rows.length,1);
  assert.equal((await db.query("delete from storage.objects where name like 'child_one/%' returning name")).rows.length,2);
  await role('anon');assert.equal((await db.query("select profile_data from public.homepage_profiles where slug='child_one'")).rows[0].profile_data.profile.name,'child one');
- console.log('PASS: SQL/multi-profile migration repeatability; per-profile database/Storage isolation; backend RPC/directory protection; login throttling; immediate old-token revocation after reset; public reads; owner writes; server version timestamp; anon/other-user database and Storage writes denied even with legacy permissive policies. Embedded PostgreSQL, not live Supabase.');
+ // Deletion tombstones revoke public/old-session access before physical cleanup.
+ await role('authenticated',replacement);await denied("select public.homepage_disable_editor('child_one')");
+ await role('service_role');await denied("select public.homepage_disable_editor('fuguang')");
+ assert.equal((await db.query("select public.homepage_disable_editor('child_one') as uid")).rows[0].uid,replacement);
+ await role('anon');assert.equal((await db.query("select * from public.homepage_profiles where slug='child_one'")).rows.length,0);
+ await role('authenticated',replacement);
+ assert.equal((await db.query("update public.homepage_profiles set profile_data='{}' where slug='child_one' returning slug")).rows.length,0);
+ await denied("insert into storage.objects(bucket_id,name) values('homepage-media','child_one/deleted.png')");
+ await role('service_role');await denied("select public.homepage_replace_editor('child_one','"+replacement+"','"+other+"','revive@profiles.invalid')");
+ await db.exec("select public.homepage_purge_editor('child_one','"+replacement+"')");
+ assert.deepEqual((await db.query("select profile_data from public.homepage_profiles where slug='child_one'")).rows[0].profile_data,{});
+ assert((await db.query("select purged_at from public.homepage_editors where slug='child_one'")).rows[0].purged_at);
+ await denied("select public.homepage_create_editor('child_one','"+other+"','reuse@profiles.invalid')");
+ console.log('PASS: SQL/multi-profile migration repeatability; per-profile database/Storage isolation; backend RPC/directory protection; login throttling; immediate old-token revocation after reset; deleted-link public/write denial and non-reusable tombstones; public reads; owner writes; server version timestamp; anon/other-user database and Storage writes denied even with legacy permissive policies. Embedded PostgreSQL, not live Supabase.');
  await db.close();
 })().catch(e=>{console.error(e);process.exitCode=1});

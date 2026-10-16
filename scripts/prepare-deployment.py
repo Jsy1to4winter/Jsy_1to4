@@ -2,7 +2,7 @@
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 parts = []
-for name in ('setup.sql', 'multi-profile.sql'):
+for name in ('setup.sql', 'multi-profile.sql', 'delete-profile.sql'):
     source = (root / 'supabase' / name).read_text()
     parts.append('\n'.join(line for line in source.splitlines() if line.strip().lower() not in ('begin;', 'commit;')))
 (root / 'supabase/install.sql').write_text('-- Complete installation/update. Preserves existing profiles and files.\nbegin;\n' + '\n\n'.join(parts) + '\ncommit;\n')
@@ -13,6 +13,7 @@ handler = handler.replace(
 ).replace('const reply = (body,', 'const reply = (body: unknown,').replace(
     'return async request =>', 'return async (request: Request) =>'
 ).replace('let orphanUser = null, admin;', 'let orphanUser: string | null = null, admin: ReturnType<typeof createClient> | undefined;')
+handler = handler.replace('async function removeFolder(prefix,', 'async function removeFolder(prefix: string,')
 types = '''type HandlerDependencies = {
   createClient: typeof createClient;
   env: { get(name: string): string | undefined };

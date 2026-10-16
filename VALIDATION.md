@@ -31,3 +31,12 @@
 ## GitHub Pages 发布工作流
 
 新增 `.github/workflows/pages.yml`：支持 main 推送和手动运行，仅打包 index.html、cloud-sync.js、profile-access.js。需要在仓库 Settings → Pages 将 Source 切换为 GitHub Actions；实际线上部署结果仍需在 Actions 中确认。
+
+## 微信公开读取、音乐及删除功能修复
+
+- 只读访问真实 `huaisang789`：HTTP 200，返回单对象和正确的 Pages Origin CORS 响应。该次快照包含文字资料与 6 张相册图片，没有音乐记录；未登录或写入真实资料。
+- 公开读取改为原生 fetch、无缓存，不依赖编辑会话或 SDK 初始化。前端 SDK 固定为 2.118.0 并随 Pages 发布，移除外部 CDN 运行依赖，资源附带版本参数。
+- 浏览器测试覆盖阻断 CDN/SDK 时的公开文字与手动音乐播放、手机视口/触摸模拟、播放按钮与自动播放补偿冲突、MP3 MIME 推断与坏文件拒绝、读取错误持续提示和重试。
+- 后台测试覆盖删除鉴权、先停用再清理、失败可重试、其他目录保留、禁止复用已删除编号；SQL 测试验证停用后匿名读取和旧身份写入被拒。没有删除真实用户的链接或文件。
+- WebKit 引擎下载被环境网络策略拒绝（403），未完成真实 WebKit/iPhone 微信或安卓微信设备验收，需使用者在 Pages 更新后实机复测。
+- 删除功能需要所有者执行最新 `delete-profile.sql`（或完整 `install.sql`），并重新部署最新版 `profile-access` 函数；本任务未执行真实项目迁移或远程函数部署。

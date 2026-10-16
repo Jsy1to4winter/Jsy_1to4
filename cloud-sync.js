@@ -12,6 +12,13 @@ const cloudStatus = document.createElement('p');
 cloudStatus.className = 'hint';
 cloudStatus.setAttribute('role', 'status');
 $('modal').querySelector('.panel h2').after(cloudStatus);
+const publicReadStatus = document.createElement('div');
+publicReadStatus.id='cloudReadStatus'; publicReadStatus.className='hint'; publicReadStatus.setAttribute('role','status'); publicReadStatus.hidden=true;
+const publicReadText=document.createElement('span');
+const publicRetry=document.createElement('button'); publicRetry.className='btn small'; publicRetry.textContent='重新读取'; publicRetry.hidden=true;
+publicReadStatus.append(publicReadText,publicRetry); $('displayBio').after(publicReadStatus);
+publicRetry.onclick=()=>{if(!cloudBusy)void loadCloud().catch(cloudError);};
+
 const cloudStyle = document.createElement('style');
 cloudStyle.textContent = 'body.cloud-busy .editor button,body.cloud-busy .editor input,body.cloud-busy .editor textarea{pointer-events:none;opacity:.6}body:not(.profile-unlocked) .cloud-admin{display:none!important}';
 document.head.append(cloudStyle);
@@ -38,17 +45,32 @@ function applyCloud(row) {
   if ($('avatarBubble')) { const text = data.bubbleText ?? '你好'; $('avatarBubble').textContent = text; $('avatarBubble').style.display = text ? 'block' : 'none'; }
 }
 async function loadCloud() {
-  cloudReady = false;
-  if (!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(PROFILE_SLUG)) throw Error('子链接编号格式不正确');
-  const {data: row, error} = await profileSupabase.from('homepage_profiles').select('profile_data,updated_at,owner_id').eq('slug', PROFILE_SLUG).single();
-  if (error) {
-    if (error.code === 'PGRST116') throw Error('此专属主页不存在，请核对链接或联系提供者创建');
+  publicReadStatus.hidden=false;publicReadText.textContent='正在读取最新资料…';publicRetry.hidden=true;
+  try {
+    cloudReady = false;
+    if (!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(PROFILE_SLUG)) throw Error('子链接编号格式不正确');
+    // Public reads must not wait for SDK initialization, a stored editor session,
+    // refresh-token locks or browser storage. Only writes use the authenticated SDK.
+    const url = new URL(SUPABASE_URL + '/rest/v1/homepage_profiles');
+    url.searchParams.set('select', 'profile_data,updated_at,owner_id');
+    url.searchParams.set('slug', 'eq.' + PROFILE_SLUG);
+    const response = await fetch(url, {cache:'no-store', headers:{apikey:SUPABASE_PUBLISHABLE_KEY, Accept:'application/vnd.pgrst.object+json'}});
+    const row = await response.json().catch(() => null);
+    if (!response.ok) {
+      if (row?.code === 'PGRST116') throw Error('此专属主页不存在或已删除，请核对链接或联系提供者');
+      throw Error(row?.message || '云端读取失败：' + response.status);
+    }
+    if (!row || Array.isArray(row) || typeof row !== 'object') throw Error('云端返回的资料格式不正确');
+    applyCloud(row); cloudReady = true;
+    status('已读取最新云端资料');
+    await loadMusic();
+    publicReadStatus.hidden=true;
+  } catch(error) {
+    publicReadStatus.hidden=false;publicReadText.textContent='资料读取失败：'+error.message+' ';publicRetry.hidden=false;
     throw error;
   }
-  applyCloud(row); cloudReady = true;
-  status('已读取最新云端资料');
-  await loadMusic();
 }
+
 function documentData() {
   return {...(cloudRow.profile_data || {}), profile: structuredClone(data), about: structuredClone(about),
     sectionIntros: structuredClone(sectionIntros), comments: structuredClone(presetComments), media: structuredClone(cloudMedia)};
@@ -86,10 +108,14 @@ async function commitCloud() {
 }
 let newUploads = [];
 async function uploadFile(file) {
-  if (!(file instanceof Blob) || !/^(image\/(jpeg|png|webp|gif|avif)|audio\/(mpeg|mp3))$/.test(file.type)) throw Error('请使用 JPG、PNG、WebP、GIF、AVIF 或 MP3 文件');
+  if (!(file instanceof Blob)) throw Error('请选择有效文件');
+  let contentType = file.type;
+  if (['audio/mp3','audio/x-mp3'].includes(contentType) || ((!contentType || contentType === 'application/octet-stream') && /\.mp3$/i.test(file.name || ''))) contentType = 'audio/mpeg';
+  if (!/^(image\/(jpeg|png|webp|gif|avif)|audio\/mpeg)$/.test(contentType)) throw Error('请使用 JPG、PNG、WebP、GIF、AVIF 或 MP3 文件');
+  if (contentType !== file.type) file = new File([file], file.name || 'music.mp3', {type: contentType});
   if (file.size > 50 * 1024 * 1024) throw Error('单个文件不能超过 50 MB');
   const path = PROFILE_SLUG + '/' + crypto.randomUUID();
-  const {error} = await profileSupabase.storage.from(CLOUD_BUCKET).upload(path, file, {contentType: file.type, upsert: false});
+  const {error} = await profileSupabase.storage.from(CLOUD_BUCKET).upload(path, file, {contentType, upsert: false});
   if (error) {
     if (/bucket not found/i.test(error.message || '')) throw Error('未找到 homepage-media 存储桶，请先在 Supabase SQL Editor 执行项目内的 supabase/setup.sql');
     throw error;
@@ -172,8 +198,10 @@ const oldAddCommentRow = addCommentRow;
 addCommentRow = function(c) { oldAddCommentRow(c); $('commentRows').lastElementChild.dataset.time = c.time || '刚刚'; };
 $('avatarFile').onchange = e => { const file = e.target.files?.[0]; e.target.value = ''; if(file) void cloudAction(async () => { data.avatar = await uploadFile(file); }); };
 aboutFile.onchange = e => { const file = e.target.files?.[0]; e.target.value = ''; if(file) void cloudAction(async () => { about.image = await uploadFile(file); }, showAbout); };
-mediaAll = async function(type) {
-  return Promise.all(cloudMedia.filter(x => x.type === type).map(async item => {
+mediaAll = async function(type, includeFiles=false) {
+  const items=cloudMedia.filter(x => x.type === type);
+  if(!includeFiles) return structuredClone(items);
+  return Promise.all(items.map(async item => {
     const response = await fetch(item.url); if (!response.ok) throw Error('云端文件读取失败：' + response.status);
     return {...item, file: await response.blob()};
   }));
@@ -184,14 +212,33 @@ mediaDelete = async function(id) {
 };
 loadMusic = async function() {
   activeMusic = cloudMedia.find(x => x.type === 'music') || null;
-  audio.pause(); audio.removeAttribute('src');
-  if (activeMusic) audio.src = activeMusic.url;
+  const next = activeMusic?.url || '';
+  if ((audio.getAttribute('src') || '') !== next) {
+    audio.pause(); audio.removeAttribute('src');
+    if(next) audio.src = next;
+    audio.load();
+    if(next) void tryAutoplay();
+  }
   const name = $('songName'); if(name) name.textContent = activeMusic?.name?.replace(/\.mp3$/i, '') || 'My Song';
-  updatePlayButton(); if(activeMusic) void tryAutoplay();
+  updatePlayButton();
 };
+async function validateMusic(file) {
+  const probe = document.createElement('audio');
+  const url = URL.createObjectURL(new Blob([file],{type:'audio/mpeg'}));
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('无法读取音乐，请检查文件并重试')), 15000);
+      probe.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
+      probe.onerror = () => { clearTimeout(timer); reject(Error('音乐文件无法播放，请选择有效的 MP3 文件')); };
+      probe.preload = 'metadata'; probe.src = url; probe.load();
+    });
+  } finally { probe.removeAttribute('src'); probe.load(); URL.revokeObjectURL(url); }
+}
+
 musicFile.onchange = e => {
   const file = e.target.files?.[0]; e.target.value = '';
   if(file) void cloudAction(async () => {
+    await validateMusic(file);
     const url = await uploadFile(file);
     cloudMedia = cloudMedia.filter(x => x.type !== 'music');
     cloudMedia.push({id: crypto.randomUUID(), type: 'music', name: file.name, url});
@@ -256,5 +303,8 @@ if (!IS_CHILD_PROFILE) tool('上传旧浏览器媒体', () => {
 const retry = document.createElement('button'); retry.className = 'btn'; retry.textContent = '重新读取云端';
 retry.onclick = () => { if(!cloudBusy && confirm('重新读取会替换尚未保存的输入，继续？')) void loadCloud().catch(cloudError); };
 cloudStatus.after(retry);
-window.addEventListener('focus', () => { if(!cloudBusy && !document.querySelector('.editor.open')) void loadCloud().catch(cloudError); });
+function refreshPublicProfile() { if(!cloudBusy && !document.querySelector('.editor.open')) void loadCloud().catch(cloudError); }
+window.addEventListener('focus', refreshPublicProfile);
+window.addEventListener('pageshow', event => {if(event.persisted)refreshPublicProfile();});
+document.addEventListener('visibilitychange', () => {if(document.visibilityState==='visible')refreshPublicProfile();});
 void loadCloud().catch(error => { cloudReady = false; cloudError(error); });
