@@ -1,6 +1,7 @@
 /* Integration test with real Supabase JS SDK + mocked HTTP, not a live RLS test. */
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || '/tmp/homepage-validation/node_modules/playwright');
 const fs = require('node:fs');
+const uploadDuringRefresh=require('./upload-refresh.cjs');
 const assert = require('node:assert/strict');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1cAAAAASUVORK5CYII=', 'base64');
 const legacyAvatar = 'data:image/png;base64,'+png.toString('base64');
@@ -88,10 +89,30 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     await page.click('.gallery-delete');await waitSaved(page);assert.equal(row.profile_data.media.length,0);assert(!objects.has(imagePath));
     await page.click('#detailClose');
     // The existing audio element plays a real MP3 returned by mocked Storage.
-    await page.locator('#musicInput').setInputFiles({name:'tone.mp3',mimeType:'audio/mpeg',buffer:mp3});await waitSaved(page);
+    await uploadDuringRefresh(page,{name:'tone.mp3',mimeType:'audio/mpeg',buffer:mp3});await waitSaved(page);
     await page.waitForFunction(()=>document.getElementById('profileAudio').readyState>=2);
     assert(await page.locator('#profileAudio').evaluate(a=>a.duration>0));
     assert.equal(row.profile_data.media.filter(x=>x.type==='music').length,1);
+    // A genuine read failure still blocks uploads and reports its actual cause.
+    const storedMusicUrl=row.profile_data.media.find(x=>x.type==='music').url;
+    const beforeReadFailure={writes,objects:objects.size};
+    const readFailure=async route=>{
+      const req=route.request(),url=new URL(req.url());
+      if(req.method()==='GET'&&url.searchParams.get('select')?.includes('profile_data')) return route.fulfill({status:503,headers:{'access-control-allow-origin':'*','content-type':'application/json'},body:JSON.stringify({message:'read service unavailable'})});
+      return route.fallback();
+    };
+    await page.route('**/rest/v1/homepage_profiles*',readFailure);
+    await page.evaluate(()=>loadCloud().catch(()=>{}));
+    await page.locator('#musicInput').setInputFiles({name:'retry.mp3',mimeType:'audio/mpeg',buffer:mp3});await waitSaved(page);
+    assert.equal(writes,beforeReadFailure.writes);assert.equal(objects.size,beforeReadFailure.objects);assert.equal(row.profile_data.media.find(x=>x.type==='music').url,storedMusicUrl);assert.match(await page.locator('#toast').textContent(),/read service unavailable/);
+    await page.unroute('**/rest/v1/homepage_profiles*',readFailure);
+    // Selecting again retries the read automatically and retains the selected file.
+    await page.locator('#musicInput').setInputFiles({name:'retry.mp3',mimeType:'audio/mpeg',buffer:mp3});await waitSaved(page);
+    assert.equal(row.profile_data.media.find(x=>x.type==='music').name,'retry.mp3');assert.notEqual(row.profile_data.media.find(x=>x.type==='music').url,storedMusicUrl);
+    // An intervening remote edit must remain protected while an upload waits.
+    const beforeConflict={writes,objects:objects.size,music:row.profile_data.media.find(x=>x.type==='music').url};
+    await uploadDuringRefresh(page,{name:'stale.mp3',mimeType:'audio/mpeg',buffer:mp3},()=>{row.updated_at='2031-01-01T00:00:00Z';row.profile_data.refreshNote='another device update';});
+    assert.equal(writes,beforeConflict.writes);assert.equal(objects.size,beforeConflict.objects);assert.equal(row.profile_data.media.find(x=>x.type==='music').url,beforeConflict.music);assert.match(await page.locator('#toast').textContent(),/其他设备更新/);
     await page.getByRole('button',{name:'删除音乐',exact:true}).click();await waitSaved(page);
     assert.equal(row.profile_data.media.filter(x=>x.type==='music').length,0);
     // Comment delete retains the other entry and its uploaded avatar.
@@ -119,6 +140,6 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     assert.equal(await sp.locator('#displayName').textContent(),'同步昵称');assert.deepEqual(exportErrors,[]);await sp.close();
     await page.click('#profileLock');await page.waitForSelector('body:not(.profile-unlocked)');
     assert.deepEqual(errors,[]);
-    console.log('PASS: text save with legacy inline avatar and missing Storage bucket, cloud reads, visitor lock, owner login, all text, comments/avatar, image preview/upload/delete, database/upload failure, edit conflict, fresh visitor, read-only HTML export, logout; real SDK + mocked HTTP.');
+    console.log('PASS: text save with legacy inline avatar and missing Storage bucket, cloud reads, file-picker refresh race, read-failure upload guard/retry, visitor lock, owner login, all text, comments/avatar, image preview/upload/delete, database/upload failure, edit conflict, fresh visitor, read-only HTML export, logout; real SDK + mocked HTTP.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exitCode=1;});

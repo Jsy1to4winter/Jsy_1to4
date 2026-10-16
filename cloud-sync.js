@@ -5,6 +5,7 @@ let cloudRow = null;
 let cloudMedia = [];
 let cloudBusy = false;
 let cloudReady = false;
+let cloudReadPromise = null;
 const localMediaAll = mediaAll;
 const legacyText = {profile: structuredClone(data), about: structuredClone(about), sectionIntros: structuredClone(sectionIntros), comments: structuredClone(presetComments)};
 const legacyImages = {avatar: data.avatar, about: about.image, comments: structuredClone(presetComments)};
@@ -44,8 +45,20 @@ function applyCloud(row) {
   render();
   if ($('avatarBubble')) { const text = data.bubbleText ?? '你好'; $('avatarBubble').textContent = text; $('avatarBubble').style.display = text ? 'block' : 'none'; }
 }
-async function loadCloud() {
+function loadCloud() {
+  if (cloudReadPromise) return cloudReadPromise;
+  const pending = readCloudOnce();
+  cloudReadPromise = pending;
+  // Both branches handle completion so the bookkeeping promise cannot produce
+  // an unhandled rejection; callers still receive the original read failure.
+  const done = () => { if (cloudReadPromise === pending) cloudReadPromise = null; };
+  pending.then(done, done);
+  return pending;
+}
+async function readCloudOnce() {
   publicReadStatus.hidden=false;publicReadText.textContent='正在读取最新资料…';publicRetry.hidden=true;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),20000);
   try {
     cloudReady = false;
     if (!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(PROFILE_SLUG)) throw Error('子链接编号格式不正确');
@@ -54,7 +67,7 @@ async function loadCloud() {
     const url = new URL(SUPABASE_URL + '/rest/v1/homepage_profiles');
     url.searchParams.set('select', 'profile_data,updated_at,owner_id');
     url.searchParams.set('slug', 'eq.' + PROFILE_SLUG);
-    const response = await fetch(url, {cache:'no-store', headers:{apikey:SUPABASE_PUBLISHABLE_KEY, Accept:'application/vnd.pgrst.object+json'}});
+    const response = await fetch(url, {cache:'no-store', signal:controller.signal, headers:{apikey:SUPABASE_PUBLISHABLE_KEY, Accept:'application/vnd.pgrst.object+json'}});
     const row = await response.json().catch(() => null);
     if (!response.ok) {
       if (row?.code === 'PGRST116') throw Error('此专属主页不存在或已删除，请核对链接或联系提供者');
@@ -66,9 +79,24 @@ async function loadCloud() {
     await loadMusic();
     publicReadStatus.hidden=true;
   } catch(error) {
+    cloudReady=false;
+    if(controller.signal.aborted || error.name==='AbortError') error=Error('云端读取超时，请检查网络后重试');
     publicReadStatus.hidden=false;publicReadText.textContent='资料读取失败：'+error.message+' ';publicRetry.hidden=false;
     throw error;
+  } finally { clearTimeout(timeout); }
+}
+
+async function ensureCloudReady() {
+  // Returning from a native file picker can trigger focus/visibility refresh
+  // immediately before change. Keep the selected File and wait for that read.
+  if(cloudReadPromise) {
+    status('正在读取云端资料，完成后会继续保存…');
+    await cloudReadPromise;
+  } else if(!cloudReady || !cloudRow) {
+    status('正在重新读取云端资料，完成后会继续保存…');
+    await loadCloud();
   }
+  if(!cloudReady || !cloudRow) throw Error('云端资料读取失败，未上传或修改数据');
 }
 
 function documentData() {
@@ -144,10 +172,13 @@ async function uploadInlineImages(includeExisting = false) {
 async function cloudAction(operation, after) {
   if (cloudBusy) { toast('正在同步，请稍候'); return; }
   cloudBusy = true; document.body.classList.add('cloud-busy'); newUploads = [];
-  const before = cloudRow ? structuredClone(cloudRow) : null;
+  const versionBeforeRead = cloudRow ? cloudRow.updated_at : undefined;
+  let before = null;
   let committed = false;
   try {
-    if (!cloudReady) throw Error('云端尚未读取成功，请点击重新读取');
+    await ensureCloudReady();
+    before = structuredClone(cloudRow);
+    if (versionBeforeRead !== undefined && cloudRow.updated_at !== versionBeforeRead) throw Error('资料已被其他设备更新，请检查最新内容后重新保存或选择文件');
     if (!await window.cloudCanEdit()) throw Error('仅主页管理员可以修改');
     await operation();
     await uploadInlineImages();

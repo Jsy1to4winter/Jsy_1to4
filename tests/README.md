@@ -17,12 +17,15 @@ python -m http.server 8000 --bind 0.0.0.0 > /tmp/homepage-http.log 2>&1
 ```sh
 node tests/browser.cjs
 node tests/children.cjs
+node tests/read-timeout.cjs
 node tests/access-function.mjs
 node tests/rls.cjs
 DENO_DIR=/tmp/homepage-deno /tmp/homepage-validation/node_modules/.bin/deno check supabase/functions/profile-access/index.ts supabase/profile-access-dashboard.ts
 ```
 
-- `browser.cjs`：真实 SDK 和 Chromium，模拟 Auth/数据库/Storage HTTP；验证原 V19 单主页、同站点 SDK 加载、缺桶情况下的文字保存、个人资料和板块前言、留言增改删和头像、图片上传/删除/放大、MP3 解码/删除、失败回滚、冲突、新访客读取、只读快照及退出登录。
+- `read-timeout.cjs`：虚拟浏览器时钟和停滞的 JSON 响应流，验证 20 秒超时、准确错误提示和可重试状态。
+- `upload-refresh.cjs`：浏览器回归的共享场景，模拟文件选择器返回时同时触发 focus/pageshow/visibilitychange，并阻塞公开读取；验证上传等待且只发生一次读取。
+- `browser.cjs`：真实 SDK 和 Chromium，模拟 Auth/数据库/Storage HTTP；验证原 V19 单主页、同站点 SDK 加载、缺桶情况下的文字保存、个人资料和板块前言、留言增改删和头像、图片上传/删除/放大、MP3 解码/删除、失败回滚、读取失败时拒绝上传及恢复后自动重试、等待中远程修改的冲突保护、新访客读取、只读快照及退出登录。
 - `children.cjs`：真实 SDK、Chromium 和实际 Edge Function handler，模拟其 Auth/数据库/Storage；验证主站创建两份子链接、密码一一对应、同浏览器不同链接会话隔离、文字/头像/相册/音乐保存、新访客播放/预览、密码重置后旧会话拒绝、文件和数据保留、子链接快照导出、错误链接不读取主站本地草稿、阻断 SDK 后仍能公开读取与点击播放、手机触摸模拟、缺 MIME 的 MP3 上传、无效音乐拒绝、读取失败重试、删除后仅清理目标目录。外部 CDN 请求在测试中被阻断。
 - `access-function.mjs`：在 Node 执行实际 handler，覆盖管理员鉴权、错误密码/错误链接、创建重名、输入校验、限流、密码重置、创建失败清理、删除鉴权、失败后重试清理、保留其他人的文件；确认响应不泄漏后端密钥或内部邮箱。
 - `rls.cjs`：PGlite PostgreSQL 执行实际完整安装 SQL 及分步迁移并重复执行。验证匿名读取、不同 owner 的数据库和文件隔离、私有目录/RPC 权限、旧宽松策略约束、密码重置后旧 token 无法再写入和新身份可管理原文件，以及删除后公开读取/写入均拒绝、编号不能复用。

@@ -1,6 +1,7 @@
 /* Real browser + SDK + actual Edge handler; Auth/PostgREST/Storage are simulated. */
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || '/tmp/homepage-validation/node_modules/playwright');
 const fs=require('node:fs'), assert=require('node:assert/strict');
+const uploadDuringRefresh=require('./upload-refresh.cjs');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1cAAAAASUVORK5CYII=','base64');
 const mp3=fs.readFileSync(__dirname+'/fixtures/tone.mp3');
 const root='00000000-0000-4000-8000-000000000001';let sequence=1,revision=0;
@@ -84,7 +85,7 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   await p1.fill('#nameInput','一号专属资料');await p1.fill('#bioInput','一号的简介');await p1.fill('[data-preface="gallery"]','一号相册');await p1.click('#saveBtn');await saved(p1);
   await p1.locator('#avatarFile').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});await saved(p1);
   await p1.locator('#musicInput').setInputFiles({name:'bad.mp3',mimeType:'audio/mpeg',buffer:Buffer.from('not music')});await saved(p1);assert(!profiles.get('person_one').profile_data.media.some(x=>x.type==='music'));
-  await p1.locator('#musicInput').setInputFiles({name:'music.mp3',mimeType:'application/octet-stream',buffer:mp3});await saved(p1);await p1.waitForFunction(()=>document.getElementById('profileAudio').readyState>=2);
+  await uploadDuringRefresh(p1,{name:'music.mp3',mimeType:'application/octet-stream',buffer:mp3});await saved(p1);await p1.waitForFunction(()=>document.getElementById('profileAudio').readyState>=2);
   await p1.click('#editBtn');await p1.click('[data-tool="gallery"]');await p1.locator('#galleryInput').setInputFiles({name:'photo.png',mimeType:'image/png',buffer:png});await saved(p1);
   assert(profiles.get('person_one').profile_data.profile.avatar.includes('/person_one/'));assert.equal(profiles.get('person_one').profile_data.media.length,2);
   // The same browser can hold independent credentials in different profile tabs.
@@ -123,6 +124,6 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   assert(profiles.get('person_two').deleted_at);assert(editors.get('person_two').purged_at);assert.deepEqual(profiles.get('person_two').profile_data,{});assert(![...objects.keys()].some(path=>path.startsWith('person_two/')));assert.deepEqual([...objects.keys()].filter(path=>path.startsWith('person_one/')),retainedFiles);
   const gone=await visitorCtx.newPage();await gone.goto('http://127.0.0.1:8000/?profile=person_two');await gone.waitForFunction(()=>document.getElementById('toast').textContent.includes('不存在或已删除'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: root creates two links; password-only child login; wrong-link password rejected; per-link sessions in one browser; isolated text/avatar/gallery/MP3 uploads; public playback/preview; root resets password; old session revoked; data/files preserved; child snapshot export; missing-link local draft isolation; public reads without SDK; one-tap manual music in mobile emulation; visible read-error retry; MIME inference/invalid-file rejection; deletion with scoped file cleanup. Real SDK + actual handler + mock services.');
+  console.log('PASS: root creates two links; child MP3 waits for file-picker refresh; password-only child login; wrong-link password rejected; per-link sessions in one browser; isolated text/avatar/gallery/MP3 uploads; public playback/preview; root resets password; old session revoked; data/files preserved; child snapshot export; missing-link local draft isolation; public reads without SDK; one-tap manual music in mobile emulation; visible read-error retry; MIME inference/invalid-file rejection; deletion with scoped file cleanup. Real SDK + actual handler + mock services.');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1});
