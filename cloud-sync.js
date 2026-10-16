@@ -86,12 +86,27 @@ async function uploadFile(file) {
   if (file.size > 50 * 1024 * 1024) throw Error('单个文件不能超过 50 MB');
   const path = PROFILE_SLUG + '/' + crypto.randomUUID();
   const {error} = await profileSupabase.storage.from(CLOUD_BUCKET).upload(path, file, {contentType: file.type, upsert: false});
-  if (error) throw error;
+  if (error) {
+    if (/bucket not found/i.test(error.message || '')) throw Error('未找到 homepage-media 存储桶，请先在 Supabase SQL Editor 执行项目内的 supabase/setup.sql');
+    throw error;
+  }
   newUploads.push(path);
   return profileSupabase.storage.from(CLOUD_BUCKET).getPublicUrl(path).data.publicUrl;
 }
-async function uploadInlineImages() {
-  async function convert(url) { return typeof url === 'string' && url.startsWith('data:image/') ? uploadFile(await (await fetch(url)).blob()) : url || ''; }
+async function uploadInlineImages(includeExisting = false) {
+  // Legacy images already stored in profile_data must not turn text edits into
+  // Storage uploads. Migrate them only when the administrator explicitly asks.
+  const previous = cloudRow?.profile_data || {};
+  const existing = new Set([
+    (previous.profile || previous).avatar,
+    previous.about?.image,
+    ...(Array.isArray(previous.comments) ? previous.comments.map(c => c.avatar) : [])
+  ].filter(Boolean));
+  async function convert(url) {
+    if (typeof url !== 'string' || !url.startsWith('data:image/')) return url || '';
+    if (!includeExisting && existing.has(url)) return url;
+    return uploadFile(await (await fetch(url)).blob());
+  }
   data.avatar = await convert(data.avatar);
   about.image = await convert(about.image);
   for (const c of presetComments) c.avatar = await convert(c.avatar);
@@ -231,6 +246,7 @@ tool('上传旧浏览器媒体', () => {
     }
     if(!data.avatar && legacyImages.avatar) data.avatar = legacyImages.avatar;
     if(!about.image && legacyImages.about) about.image = legacyImages.about;
+    await uploadInlineImages(true);
   }, loadMusic);
 });
 const retry = document.createElement('button'); retry.className = 'btn'; retry.textContent = '重新读取云端';

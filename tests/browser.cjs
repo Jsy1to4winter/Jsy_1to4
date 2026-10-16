@@ -4,10 +4,11 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const sdk = fs.readFileSync(process.env.SUPABASE_SDK || '/tmp/homepage-validation/supabase.js');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1cAAAAASUVORK5CYII=', 'base64');
+const legacyAvatar = 'data:image/png;base64,'+png.toString('base64');
 const mp3 = fs.readFileSync(__dirname+'/fixtures/tone.mp3');
 const owner = '00000000-0000-4000-8000-000000000001';
-let row = {owner_id: owner, updated_at: '2026-10-16T00:00:00+00:00', profile_data: {profile: {name:'云端昵称',bio:'云端简介',tags:['保留'],posts:6,fans:128,following:32,email:'hello@example.com',avatar:'',cards:[{icon:'✦',title:'关于我',summary:'简介',detail:'关于我详情'},{icon:'♡',title:'兴趣爱好',summary:'兴趣',detail:'爱好详情'},{icon:'◈',title:'我的经历',summary:'经历',detail:'经历详情'},{icon:'✉',title:'联系我',summary:'联系',detail:'联系详情'}]},about:{title:'云端标题',text:'云端关于我',image:''},sectionIntros:{gallery:'旧兴趣',experience:'旧经历',contact:'旧联系'},comments:[{name:'旧留言',message:'旧内容',time:'昨天',avatar:''}],media:[]}};
-let writes = 0, failWrite = false, failUpload = false;
+let row = {owner_id: owner, updated_at: '2026-10-16T00:00:00+00:00', profile_data: {profile: {name:'云端昵称',bio:'云端简介',tags:['保留'],posts:6,fans:128,following:32,email:'hello@example.com',avatar:legacyAvatar,cards:[{icon:'✦',title:'关于我',summary:'简介',detail:'关于我详情'},{icon:'♡',title:'兴趣爱好',summary:'兴趣',detail:'爱好详情'},{icon:'◈',title:'我的经历',summary:'经历',detail:'经历详情'},{icon:'✉',title:'联系我',summary:'联系',detail:'联系详情'}]},about:{title:'云端标题',text:'云端关于我',image:''},sectionIntros:{gallery:'旧兴趣',experience:'旧经历',contact:'旧联系'},comments:[{name:'旧留言',message:'旧内容',time:'昨天',avatar:''}],media:[]}};
+let writes = 0, failWrite = false, failUpload = true;
 const objects = new Map();
 const token = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:owner,exp:4102444800})).toString('base64url')+'.fake';
 const user = {id:owner,aud:'authenticated',role:'authenticated',email:'admin@example.com'};
@@ -39,7 +40,7 @@ async function context(browser) {
       return route.fulfill({headers:{...headers,'content-type':objects.get(path).type},body:objects.get(path).body});
     }
     if(req.method()==='POST' && url.pathname.startsWith(base+'homepage-media/')) {
-      if(failUpload) return reply({message:'Storage denied'},403);
+      if(failUpload) return reply({statusCode:'404',message:'Bucket not found',error:'Bucket not found'},400);
       const path=decodeURIComponent(url.pathname.slice((base+'homepage-media/').length));objects.set(path,req.postDataBuffer()?.includes(Buffer.from('audio/mpeg')) ? {body:mp3,type:'audio/mpeg'} : {body:png,type:'image/png'});return reply({Key:'homepage-media/'+path});
     }
     if(req.method()==='DELETE' && url.pathname===base+'homepage-media') {
@@ -68,6 +69,7 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     await page.click('#saveBtn');await waitSaved(page);
     assert.equal(row.profile_data.profile.name,'同步昵称');assert.equal(row.profile_data.sectionIntros.contact,'同步contact');
     assert.equal(await page.locator('#avatarBubble').textContent(),'你好呀');
+    assert.equal(row.profile_data.profile.avatar,legacyAvatar);assert.equal(objects.size,0);failUpload=false;
     await page.click('#editBtn');await page.click('[data-tool="intro"]');
     await page.fill('#aboutTitleInput','同步标题');await page.fill('#aboutTextInput','同步关于我');await page.click('#saveAbout');await waitSaved(page);
     assert.equal(row.profile_data.about.text,'同步关于我');
@@ -104,7 +106,7 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     row.updated_at='2030-01-01T00:00:00Z';await page.click('#saveBtn');await waitSaved(page);assert.equal(row.profile_data.profile.name,'同步昵称');
     await page.evaluate(()=>loadCloud());
     // Storage upload denial leaves profile unchanged.
-    failUpload=true;await page.locator('#avatarFile').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});await waitSaved(page);assert.equal(row.profile_data.profile.avatar,'');failUpload=false;
+    failUpload=true;await page.locator('#avatarFile').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});await waitSaved(page);assert.equal(row.profile_data.profile.avatar,legacyAvatar);assert.match(await page.locator('#toast').textContent(),/homepage-media/);failUpload=false;
     await page.locator('#avatarFile').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});await waitSaved(page);assert.match(row.profile_data.profile.avatar,/storage/);
     const visitor=await context(browser), vp=await visitor.newPage();await vp.goto('http://127.0.0.1:8000');await vp.waitForFunction(()=>cloudReady);
     assert.equal(await vp.locator('#displayName').textContent(),'同步昵称');assert.equal(await vp.locator('#homeIntroBody').textContent(),'同步关于我');assert.equal(await vp.locator('#commentWall .comment-item').count(),1);
@@ -118,6 +120,6 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     assert.equal(await sp.locator('#displayName').textContent(),'同步昵称');assert.deepEqual(exportErrors,[]);await sp.close();
     await page.click('#profileLock');await page.waitForSelector('body:not(.profile-unlocked)');
     assert.deepEqual(errors,[]);
-    console.log('PASS: cloud reads, visitor lock, owner login, all text, comments/avatar, image preview/upload/delete, database/upload failure, edit conflict, fresh visitor, read-only HTML export, logout; real SDK + mocked HTTP.');
+    console.log('PASS: text save with legacy inline avatar and missing Storage bucket, cloud reads, visitor lock, owner login, all text, comments/avatar, image preview/upload/delete, database/upload failure, edit conflict, fresh visitor, read-only HTML export, logout; real SDK + mocked HTTP.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exitCode=1;});

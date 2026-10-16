@@ -46,7 +46,7 @@ python -m http.server 8000 --bind 0.0.0.0
 
 已运行真实 Supabase JS SDK 配合模拟 HTTP 的 Chromium 功能测试，以及在嵌入式 PostgreSQL 中执行实际 SQL 的权限测试。见 [tests/README.md](tests/README.md)。这两类测试不代替真实项目的端到端验证。
 
-本次环境直接访问实际 Supabase 项目时，网络代理返回 **CONNECT 403**；没有登录你的真实账号、执行项目 SQL 或确认真实云端写入。上线前务必：
+初次验证时访问实际 Supabase 被网络代理返回 **CONNECT 403**。后续排查已可匿名读取真实主页（HTTP 200），并确认 `homepage-media` 尚不存在（Storage 返回 `Bucket not found`）。已有内嵌头像现在会保留在数据库中，不再因保存文字而强制上传；新增媒体及显式迁移仍须先执行 SQL 创建桶及策略。没有登录真实账号、执行项目 SQL 或确认真实云端写入。上线前务必：
 
 1. 执行 SQL，确认原有管理员仍可登录，编辑并保存所有文字板块。
 2. 上传/替换/删除相册、头像、留言头像和 MP3，在 Storage 和 `profile_data` 核对引用；用播放器实际试听音乐。

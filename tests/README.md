@@ -14,7 +14,7 @@ node tests/browser.cjs
 node tests/rls.cjs
 ```
 
-`browser.cjs` 使用真实 Supabase SDK、模拟 Auth/PostgREST/Storage HTTP，以及真实浏览器 UI。覆盖访客锁、管理员登录、完整文字保存、留言增改删及头像上传、相册上传/删除/放大、真实 MP3 解码、上传/保存失败、多设备冲突、新访客读取及退出登录。不会接触真实项目数据。
+`browser.cjs` 使用真实 Supabase SDK、模拟 Auth/PostgREST/Storage HTTP，以及真实浏览器 UI。覆盖存储桶缺失且已有内嵌头像时仍可保存文字、访客锁、管理员登录、完整文字保存、留言增改删及头像上传、相册上传/删除/放大、真实 MP3 解码、上传/保存失败、多设备冲突、新访客读取及退出登录。不会接触真实项目数据。
 
 `rls.cjs` 在 PGlite PostgreSQL 中加载完整 `supabase/setup.sql` 两次，模拟 Supabase 的 Auth/Storage 表和角色。验证公共读取、owner 更新/删除文件、服务端时间戳、匿名和非 owner 无法修改数据库/文件；故意加入旧宽松策略，验证新限制策略仍生效。不是对真实 Supabase 项目策略的审计。
 
