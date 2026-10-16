@@ -39,8 +39,12 @@ function applyCloud(row) {
 }
 async function loadCloud() {
   cloudReady = false;
+  if (!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(PROFILE_SLUG)) throw Error('子链接编号格式不正确');
   const {data: row, error} = await profileSupabase.from('homepage_profiles').select('profile_data,updated_at,owner_id').eq('slug', PROFILE_SLUG).single();
-  if (error) throw error;
+  if (error) {
+    if (error.code === 'PGRST116') throw Error('此专属主页不存在，请核对链接或联系提供者创建');
+    throw error;
+  }
   applyCloud(row); cloudReady = true;
   status('已读取最新云端资料');
   await loadMusic();
@@ -222,8 +226,8 @@ function exportJson(value, filename) {
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 $('exportBtn').onclick = () => exportJson(documentData(), '个人主页云端资料.json');
-tool('备份旧浏览器文字', () => exportJson(legacyText, 'V19旧浏览器文字备份.json'));
-tool('导入旧浏览器文字', () => {
+if (!IS_CHILD_PROFILE) tool('备份旧浏览器文字', () => exportJson(legacyText, 'V19旧浏览器文字备份.json'));
+if (!IS_CHILD_PROFILE) tool('导入旧浏览器文字', () => {
   if (!confirm('仅在原先编辑 V19 的浏览器使用：这会用此浏览器原有文字和留言替换当前云端文字。请先备份，继续？')) return;
   void cloudAction(() => { data = structuredClone(legacyText.profile); about = structuredClone(legacyText.about); sectionIntros = structuredClone(legacyText.sectionIntros); presetComments = structuredClone(legacyText.comments); });
 });
@@ -231,7 +235,7 @@ tool('删除主页头像', () => void cloudAction(() => {data.avatar = '';}));
 tool('更换关于我图片', () => aboutFile.click());
 tool('删除关于我图片', () => void cloudAction(() => {about.image = '';}));
 tool('删除音乐', () => void cloudAction(() => {cloudMedia = cloudMedia.filter(x => x.type !== 'music');}, loadMusic));
-tool('上传旧浏览器媒体', () => {
+if (!IS_CHILD_PROFILE) tool('上传旧浏览器媒体', () => {
   if(!confirm('将此浏览器的旧相册和音乐上传到云端。请先导出资料备份，继续？')) return;
   void cloudAction(async () => {
     for(const type of ['gallery','experience','contact','music']) {

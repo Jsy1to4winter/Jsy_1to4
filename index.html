@@ -73,13 +73,13 @@ body{background:#e8e9eb}.page{background:linear-gradient(160deg,#f5f5f6,#eeeff1 
 <script id="supabase-config">
 const SUPABASE_URL='https://nedsvrzbsrethlyyoqey.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_kc6Gyp_6GY0VoCeL3iQ4GA_EtDhQF10';
-const PROFILE_SLUG='fuguang';
-const profileSupabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+const PROFILE_SLUG=new URLSearchParams(location.search).get('profile') ?? 'fuguang';
+const profileSupabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{storageKey:'homepage-auth:'+encodeURIComponent(PROFILE_SLUG)}});
 </script>
 <script>
 // 初始资料：可以直接在这里修改文字。也可以点击网页上的“编辑主页”。
 const defaults={name:'个人主页',bio:'在这里写下你的个人简介。',tags:[],posts:0,fans:0,following:0,email:'',avatar:'',cards:[{icon:'✦',title:'关于我',summary:'点击了解我的个人介绍',detail:'这里可以写你的经历、性格和个人故事。'},{icon:'♡',title:'兴趣爱好',summary:'记录我喜欢的一切',detail:'这里可以介绍喜欢的音乐、电影、游戏和日常。'},{icon:'◈',title:'我的经历',summary:'一些值得分享的故事',detail:'这里可以填写学习、工作和生活经历。'},{icon:'✉',title:'联系我',summary:'期待与你交流',detail:'这里可以写联系方式或想对来访者说的话。'}]};
-const key='my-profile-v1';let data;try{data={...defaults,...JSON.parse(localStorage.getItem(key)||'{}')}}catch{data=structuredClone(defaults)};
+const key=PROFILE_SLUG==='fuguang'?'my-profile-v1':'my-profile-v1:'+PROFILE_SLUG;let data;try{data={...defaults,...JSON.parse(localStorage.getItem(key)||'{}')}}catch{data=structuredClone(defaults)};
 const $=id=>document.getElementById(id);function toast(t){$('toast').textContent=t;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2200)}
 function render(){$('displayName').textContent=data.name;$('displayBio').textContent=data.bio;$('postCount').textContent=data.posts;$('fanCount').textContent=data.fans;$('followCount').textContent=data.following;$('avatar').src=data.avatar||'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="black"/></svg>');$('tags').replaceChildren(...data.tags.map(t=>{let s=document.createElement('span');s.className='tag';s.textContent=t;return s}));$('cards').replaceChildren(...data.cards.map((c,i)=>{let e=document.createElement('article');e.className='card';let ic=document.createElement('div');ic.className='icon';ic.textContent=c.icon;let h=document.createElement('h3');h.textContent=c.title;let p=document.createElement('p');p.textContent=c.summary;e.append(ic,h,p);e.onclick=()=>{const aa=document.getElementById('aboutArea');if(aa)aa.remove();$('detailText').style.display='block';$('detailTitle').textContent=c.title;$('detailText').textContent=c.detail;$('detailModal').classList.add('open')};return e}))}
 function persist(){try{localStorage.setItem(key,JSON.stringify(data))}catch{toast('图片过大，保存失败，请换一张较小的头像')}}
@@ -90,12 +90,12 @@ $('shareBtn').onclick=async()=>{if(navigator.share){try{await navigator.share({t
 $('exportBtn').onclick=()=>{let blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='我的个人主页资料.json';a.click();URL.revokeObjectURL(a.href)};$('importBtn').onclick=()=>$('importFile').click();$('importFile').onchange=async e=>{try{let obj=JSON.parse(await e.target.files[0].text());if(!Array.isArray(obj.cards))throw Error();data={...defaults,...obj};persist();render();openEditor();toast('导入成功')}catch{toast('导入失败：文件格式不正确')}};render();
 </script><script id="v4-interactions">
 // 本地持久化：大量照片及 MP3 使用 IndexedDB，不占用 localStorage 的小容量配额。
-const aboutKey='profile-about-blocks-v2';
+const aboutKey=PROFILE_SLUG==='fuguang'?'profile-about-blocks-v2':'profile-about-blocks-v2:'+PROFILE_SLUG;
 const aboutFallback={title:'你好，欢迎认识我',text:'在这里填写你的介绍。',image:''};
 let about={...aboutFallback};
 try{const previous=JSON.parse(localStorage.getItem(aboutKey));if(Array.isArray(previous)&&previous.length)about={...aboutFallback,...previous[0]};else if(previous&&!Array.isArray(previous))about={...aboutFallback,...previous}}catch{}
 function saveAbout(){try{localStorage.setItem(aboutKey,JSON.stringify([about]));return true}catch{toast('图片过大，请选择小一些的照片');return false}}
-const dbReady=new Promise((resolve,reject)=>{const req=indexedDB.open('fuguang-profile-media',1);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('media'))db.createObjectStore('media',{keyPath:'id',autoIncrement:true})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)});
+const dbReady=new Promise((resolve,reject)=>{const req=indexedDB.open(PROFILE_SLUG==='fuguang'?'fuguang-profile-media':'fuguang-profile-media:'+PROFILE_SLUG,1);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('media'))db.createObjectStore('media',{keyPath:'id',autoIncrement:true})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)});
 async function mediaAll(type){const db=await dbReady;return new Promise((res,rej)=>{const r=db.transaction('media').objectStore('media').getAll();r.onsuccess=()=>res(r.result.filter(x=>x.type===type));r.onerror=()=>rej(r.error)})}
 async function mediaPut(obj){const db=await dbReady;return new Promise((res,rej)=>{const r=db.transaction('media','readwrite').objectStore('media').put(obj);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 async function mediaDelete(id){const db=await dbReady;return new Promise((res,rej)=>{const r=db.transaction('media','readwrite').objectStore('media').delete(id);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
@@ -154,9 +154,9 @@ const sectionInfo=[
  {title:'我的经历',type:'experience',intro:'一些走过的路，一些值得留下的故事。'},
  {title:'联系我',type:'contact',intro:'如果有话想说，欢迎在这里找到我。'}
 ];
-const sectionKey='fuguang-v5-section-intros';
+const sectionKey=PROFILE_SLUG==='fuguang'?'fuguang-v5-section-intros':'fuguang-v5-section-intros:'+PROFILE_SLUG;
 let sectionIntros={};try{sectionIntros=JSON.parse(localStorage.getItem(sectionKey)||'{}')||{}}catch{}
-const commentsKey='fuguang-v5-comments';
+const commentsKey=PROFILE_SLUG==='fuguang'?'fuguang-v5-comments':'fuguang-v5-comments:'+PROFILE_SLUG;
 let presetComments=[];try{presetComments=JSON.parse(localStorage.getItem(commentsKey)||'null')||[]}catch{}
 if(!presetComments.length)presetComments=[{name:'访客',message:'欢迎来到这里。',time:'置顶'}];
 function saveV5(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch{toast('保存失败，请检查浏览器存储空间');return false}}
@@ -250,16 +250,17 @@ const v5PriorRender=render;render=function(){v5PriorRender();const cards=documen
    const media=[];
    for(const list of all)for(const item of list){media.push({id:item.id,type:item.type,name:item.name,fileData:await readAsDataURL(item.file)})}
    const state={
-    'my-profile-v1':JSON.stringify(data),
+    [key]:JSON.stringify(data),
     'fuguang-v4-about':null,
-    'fuguang-v5-section-intros':JSON.stringify(sectionIntros),
-    'fuguang-v5-comments':JSON.stringify(presetComments)
+    [sectionKey]:JSON.stringify(sectionIntros),
+    [commentsKey]:JSON.stringify(presetComments)
    };
    state[aboutKey]=JSON.stringify([about]);
    const response=await fetch(location.href);if(!response.ok)throw Error('无法读取页面源文件');
    let html=await response.text();
    html=html.replace(/<style id="owner-export-style">[\s\S]*?<\/style>/,'').replace(/<script id="owner-export-script">[\s\S]*?<\/script>/,'');
-   html=html.replace(/<script src="cloud-sync.js"><\/script>/,'').replace(/<script id="v18-lock-script">[\s\S]*?<\/script>/,'');
+   html=html.replace(/<script src="cloud-sync.js"><\/script>/,'').replace(/<script src="profile-access.js"><\/script>/,'').replace(/<script id="v18-lock-script">[\s\S]*?<\/script>/,'');
+   html=html.replace("const PROFILE_SLUG=new URLSearchParams(location.search).get('profile') ?? 'fuguang';", 'const PROFILE_SLUG='+JSON.stringify(PROFILE_SLUG)+';');
    html=html.replaceAll('localStorage.getItem(', 'window.__visitorGetItem(');
    html=html.replace('async function mediaAll(type){','async function mediaAll(type){if(window.__visitorMedia){return Promise.all(window.__visitorMedia.filter(x=>x.type===type).map(async x=>({id:x.id,type:x.type,name:x.name,file:await (await fetch(x.fileData)).blob()})))}');
    const boot=`<script id="visitor-embedded">window.__visitorState=${JSON.stringify(state).replace(/</g,'\\u003c')};window.__visitorMedia=${JSON.stringify(media).replace(/</g,'\\u003c')};window.__visitorGetItem=function(k){return Object.prototype.hasOwnProperty.call(window.__visitorState,k)?window.__visitorState[k]:null};<\/script>`;
@@ -376,6 +377,7 @@ body:not(.profile-unlocked) #avatarPlus,body:not(.profile-unlocked) .avatar-wrap
 body:not(.profile-unlocked) #avatar{cursor:default}
 </style>
 <div class="editor" id="lockDialog" role="dialog" aria-modal="true" aria-label="主页编辑解锁"><div class="panel"><h2 id="lockHeading" style="margin:0">解锁编辑权限</h2><p class="lock-subtitle" id="lockDescription">输入此主页的编辑密码，才能修改资料。</p><input class="lock-field" id="lockEmail" type="email" placeholder="管理员登录邮箱" autocomplete="username"><input class="lock-field" id="lockPassword" type="password" placeholder="请输入编辑密码" autocomplete="off"><div class="lock-error" id="lockError"></div><div class="lock-buttons"><button type="button" id="lockCancel">取消</button><button type="button" id="unlockSubmit">确认解锁</button></div></div></div>
+<script src="profile-access.js"></script>
 <script src="cloud-sync.js"></script>
 <script id="v18-lock-script">
 (function(){
@@ -386,17 +388,16 @@ const lock=document.createElement('button');lock.id='profileLock';lock.type='but
 const closed='<svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>';
 const opened='<svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7-2"/></svg>';
 lock.innerHTML=closed;document.body.append(lock);
-function refresh(){document.body.classList.toggle('profile-unlocked',unlocked);lock.classList.toggle('unlocked',unlocked);lock.innerHTML=unlocked?opened:closed;lock.title=unlocked?'编辑已解锁，点击重新上锁':'输入密码解锁编辑'}
-function showLock(){ $id('lockError').textContent='';$id('lockPassword').value='';$id('lockDialog').classList.add('open');setTimeout(()=>$id('lockEmail').focus(),40)}
+function refresh(){document.body.classList.toggle('profile-unlocked',unlocked);lock.classList.toggle('unlocked',unlocked);lock.innerHTML=unlocked?opened:closed;lock.title=unlocked?'编辑已解锁，点击重新上锁':'输入密码解锁编辑';window.profileAccessRefresh(unlocked)}
+function showLock(){ $id('lockError').textContent='';$id('lockPassword').value='';$id('lockDialog').classList.add('open');setTimeout(()=>$id(IS_CHILD_PROFILE?'lockPassword':'lockEmail').focus(),40)}
 function hideLock(){$id('lockDialog').classList.remove('open')}
 async function doUnlock(){
  const email=$id('lockEmail').value.trim(), password=$id('lockPassword').value;
- if(!email||!password){$id('lockError').textContent='请填写 Supabase 管理员邮箱和密码';return}
+ if((!IS_CHILD_PROFILE&&!email)||!password){$id('lockError').textContent=IS_CHILD_PROFILE?'请输入此链接对应的编辑密码':'请填写 Supabase 管理员邮箱和密码';return}
  $id('unlockSubmit').disabled=true;
- try{const {data:session,error}=await profileSupabase.auth.signInWithPassword({email,password});
- if(error)throw error;
+ try{await window.profileLogin(email,password);
  // 登录成功不代表具备编辑权；RLS 在云端保存时验证 owner_id。
- unlocked=await window.cloudCanEdit();if(!unlocked)throw Error('此账号不是主页管理员');refresh();hideLock();toast('管理员已登录');
+ unlocked=await window.cloudCanEdit();if(!unlocked)throw Error('此账号不是主页管理员');refresh();hideLock();$id('lockPassword').value='';toast('已解锁此主页的编辑权限');
  }catch(e){$id('lockError').textContent='登录失败：'+e.message}
  finally{$id('unlockSubmit').disabled=false}
 }

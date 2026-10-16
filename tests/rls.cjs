@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const owner='00000000-0000-4000-8000-000000000001', other='00000000-0000-4000-8000-000000000002';
 (async()=>{
  const db=new PGlite();
- await db.exec(`create role anon; create role authenticated; create schema auth; create schema storage;
+ await db.exec(`create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create schema storage;
  create table auth.users(id uuid primary key,email text);
  insert into auth.users values ('${owner}','admin@example.com'),('${other}','other@example.com');
  create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
@@ -13,11 +13,13 @@ const owner='00000000-0000-4000-8000-000000000001', other='00000000-0000-4000-80
  create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
  create function storage.foldername(text) returns text[] language sql immutable as $$ select string_to_array($1,'/') $$;
  alter table storage.objects enable row level security;
- grant usage on schema public,auth,storage to anon,authenticated;
+ grant usage on schema public,auth,storage to anon,authenticated,service_role;
  grant select,insert,update,delete on storage.objects to anon,authenticated;
  create policy old_unsafe_storage on storage.objects for all to anon,authenticated using(true) with check(true);`);
  const sql=fs.readFileSync(__dirname+'/../supabase/setup.sql','utf8').replaceAll('YOUR_ADMIN_EMAIL','admin@example.com');
  await db.exec(sql);await db.exec(sql); // Repeated setup preserves owner/data and remains executable.
+ const install=fs.readFileSync(__dirname+'/../supabase/install.sql','utf8').replaceAll('YOUR_ADMIN_EMAIL','admin@example.com');
+ await db.exec(install);await db.exec(install);
  await db.exec('create policy old_unsafe_table on public.homepage_profiles for all to anon,authenticated using(true) with check(true)');
  async function role(name,id='') {await db.exec(`reset role; set role ${name}; select set_config('request.jwt.claim.sub','${id}',false);`);}
  async function denied(sql) {let error;try{await db.exec(sql)}catch(e){error=e}assert(error,'Expected permission rejection: '+sql);}
@@ -42,6 +44,42 @@ const owner='00000000-0000-4000-8000-000000000001', other='00000000-0000-4000-80
  await role('anon');assert.equal((await db.query("select * from storage.objects where bucket_id='homepage-media'")).rows.length,1);
  assert.equal((await db.query("delete from storage.objects where bucket_id='homepage-media' returning name")).rows.length,0);
  await role('authenticated',owner);assert.equal((await db.query("delete from storage.objects where bucket_id='homepage-media' returning name")).rows.length,1);
- console.log('PASS: SQL repeatability; public reads; owner writes; server version timestamp; anon/other-user database and Storage writes denied even with legacy permissive policies. Embedded PostgreSQL, not live Supabase.');
+ // Install the multi-link migration twice, and verify backend-only operations.
+ await db.exec('reset role');
+ const multi=fs.readFileSync(__dirname+'/../supabase/multi-profile.sql','utf8');
+ await db.exec(multi);await db.exec(multi);
+ await role('anon');await denied('select * from public.homepage_editors');
+ await denied('select * from public.homepage_admins');
+ await denied("select public.homepage_take_login_attempt('child_one')");
+ await role('authenticated',owner);
+ await denied("select public.homepage_create_editor('child_one','"+other+"','secret@profiles.invalid')");
+ await role('service_role');
+ await db.exec("select public.homepage_create_editor('child_one','"+other+"','secret@profiles.invalid')");
+ for(let i=0;i<20;i++) assert.equal((await db.query("select public.homepage_take_login_attempt('child_one') as allowed")).rows[0].allowed,true);
+ assert.equal((await db.query("select public.homepage_take_login_attempt('child_one') as allowed")).rows[0].allowed,false);
+ await role('authenticated',other);
+ assert.equal((await db.query("update public.homepage_profiles set profile_data='{\"profile\":{\"name\":\"child one\"}}' where slug='child_one' returning slug")).rows.length,1);
+ assert.equal((await db.query("update public.homepage_profiles set profile_data='{}' where slug='fuguang' returning slug")).rows.length,0);
+ await db.exec("insert into storage.objects(bucket_id,name) values('homepage-media','child_one/photo.png'),('homepage-media','child_one/song.mp3')");
+ await denied("insert into storage.objects(bucket_id,name) values('homepage-media','fuguang/attack.png')");
+ await denied("update storage.objects set name='fuguang/attack.png' where name='child_one/photo.png'");
+ await role('authenticated',owner);
+ assert.equal((await db.query("delete from storage.objects where name like 'child_one/%' returning name")).rows.length,0);
+ assert.equal((await db.query("update public.homepage_profiles set profile_data='{}' where slug='child_one' returning slug")).rows.length,0);
+ // Password reset rotates ownership. Old access tokens cannot update records or files.
+ await db.exec('reset role');
+ const replacement='00000000-0000-4000-8000-000000000003';
+ await db.exec("insert into auth.users values('"+replacement+"','replacement@example.com')");
+ await role('service_role');
+ await db.exec("select public.homepage_replace_editor('child_one','"+other+"','"+replacement+"','replacement@profiles.invalid')");
+ await role('authenticated',other);
+ assert.equal((await db.query("update public.homepage_profiles set profile_data='{}' where slug='child_one' returning slug")).rows.length,0);
+ assert.equal((await db.query("delete from storage.objects where name like 'child_one/%' returning name")).rows.length,0);
+ await denied("insert into storage.objects(bucket_id,name) values('homepage-media','child_one/old-session.png')");
+ await role('authenticated',replacement);
+ assert.equal((await db.query("update public.homepage_profiles set profile_data=profile_data where slug='child_one' returning slug")).rows.length,1);
+ assert.equal((await db.query("delete from storage.objects where name like 'child_one/%' returning name")).rows.length,2);
+ await role('anon');assert.equal((await db.query("select profile_data from public.homepage_profiles where slug='child_one'")).rows[0].profile_data.profile.name,'child one');
+ console.log('PASS: SQL/multi-profile migration repeatability; per-profile database/Storage isolation; backend RPC/directory protection; login throttling; immediate old-token revocation after reset; public reads; owner writes; server version timestamp; anon/other-user database and Storage writes denied even with legacy permissive policies. Embedded PostgreSQL, not live Supabase.');
  await db.close();
 })().catch(e=>{console.error(e);process.exitCode=1});

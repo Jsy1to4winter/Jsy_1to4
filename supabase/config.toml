@@ -1,0 +1,4 @@
+[functions.profile-access]
+# Password unlock must be callable before a session exists.
+# Admin actions validate the user with Auth and homepage_admins inside the function.
+verify_jwt = false
