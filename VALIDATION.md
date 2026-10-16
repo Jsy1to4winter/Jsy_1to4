@@ -58,3 +58,11 @@
 - 浏览器测试使用自行生成的 AAC/M4A 音频，模拟错误 MP3 名称与响应类型，验证分段识别、正确 Blob 类型、播放时间推进、无 SDK 访问与导出类型；同时检查错误格式上传不会写入 Storage 或替换音乐。
 - 本次仅更新前端，不需要执行 SQL 或重新部署函数。Chromium 测试不等于 Safari/iPhone 微信实机验收，仍需 Pages 更新后实机确认。
 - 本次验证通过：`node tests/browser.cjs`、`node tests/children.cjs`、`node tests/read-timeout.cjs`，外部脚本与 12 个内联脚本语法检查、`git diff --check`。测试期间修正了模拟 Storage 的 Range 响应，使返回范围与请求一致。
+
+## 2026-10-17：Safari 可播放、iPhone 微信仍失败
+
+- 使用者反馈上一版在 Safari 已可播放，同一链接在 iPhone 微信仍无声且重试报错；因此上一版未完成微信实机修复，不能仅将当前问题归因于文件格式。
+- 本次为苹果微信点击播放增加原生桥回调路径、异常/超时回退；Audio Session API 可用时请求 playback 模式。晚到的媒体 error 事件复位按钮，按权限/网络/解码错误显示提示，重试前重新加载错误元素。
+- 真实公开音乐仍是同一 URL；未登录、写入或替换 Supabase 音乐。提供单独转换的标准 MP3 备用文件（本机输出，不提交到公开仓库）；ffprobe 确认 MP3、44.1 kHz、双声道、约 144 秒，完整解码通过，在现有 UI 中播放/暂停/再次播放通过 Chromium 验证。
+- 新的浏览器回归测试模拟苹果微信原生桥调用并验证真实音频时间推进；注入晚到的解码错误验证播放按钮复位与提示。原生桥模拟与 Chromium 不能代替 iPhone 微信实机，仍需 Pages 发布后复测。
+- 本次通过 `tests/browser.cjs`、`tests/children.cjs`（含微信桥调用与晚到解码错误断言）、12 个内联脚本语法检查及 `git diff --check`。真实设备效果仍未由本机验证。

@@ -112,7 +112,13 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   assert.equal(await vp.evaluate(async()=>(await (await fetch(audio.src)).blob()).type),'audio/mp4');
   await vp.locator('#cards .card').nth(1).click();await vp.waitForSelector('.gallery-tile img');await vp.locator('.gallery-tile img').click();assert(await vp.locator('#imageViewer').evaluate(x=>x.classList.contains('open')));
   assert(!await vp.locator('body').evaluate(b=>b.classList.contains('profile-unlocked')));
-  await vp.locator('#closeViewer').click();await vp.locator('#detailClose').click();await vp.evaluate(()=>{audio.loop=true;audio.pause();autoplayPending=true;});await vp.locator('.music-play').click();await vp.waitForFunction(()=>!audio.paused&&audio.currentTime>0);await vp.evaluate(()=>audio.pause());
+  await vp.locator('#closeViewer').click();await vp.locator('#detailClose').click();
+  await vp.evaluate(()=>{window.bridgeCalls=0;window.WeixinJSBridge={invoke(name,args,callback){if(name!=='getNetworkType')throw Error('Unexpected bridge method');window.bridgeCalls++;callback({err_msg:'getNetworkType:wifi'});}};audio.loop=true;audio.pause();autoplayPending=true;});await vp.locator('.music-play').click();await vp.waitForFunction(()=>!audio.paused&&audio.currentTime>0);
+  assert.equal(await vp.evaluate(()=>window.bridgeCalls),1);
+  // A late decoder failure must reset the button even if play() already resolved.
+  await vp.evaluate(()=>{Object.defineProperty(audio,'error',{configurable:true,get:()=>({code:3})});audio.dispatchEvent(new Event('error'));});
+  assert.equal(await vp.locator('.music-play').textContent(),'▶');assert.match(await vp.locator('#toast').textContent(),/无法解码/);
+  await vp.evaluate(()=>{delete audio.error;audio.pause();});
   const noSdkCtx=await context({viewport:{width:393,height:852},isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/113.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0'});await noSdkCtx.route('**/vendor/supabase.js*',r=>r.abort());const noSdk=await open(noSdkCtx,'person_one');
   assert.equal(await noSdk.locator('#displayName').textContent(),'一号专属资料');await noSdk.waitForFunction(()=>audio.readyState>=2);assert.equal(await noSdk.evaluate(()=>profileSupabase),null);
   await noSdk.evaluate(()=>{audio.loop=true;audio.pause();autoplayPending=true;});await noSdk.locator('.music-play').click();await noSdk.waitForFunction(()=>!audio.paused&&audio.currentTime>0);await noSdk.evaluate(()=>audio.pause());
