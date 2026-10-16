@@ -45,7 +45,9 @@ supabase functions deploy profile-access --no-verify-jwt
 
 ## 第三步：GitHub Pages
 
-将本项目更新到仓库 `main` 根目录，在 GitHub Settings → Pages 选择从 `main` 的根目录发布。无需 npm install 或构建。
+将本项目更新到仓库 `main`。在 GitHub Settings → Pages → Build and deployment 中，将 Source 选择为 **GitHub Actions**。仓库已包含 `.github/workflows/pages.yml`，仅发布网页所需的三个文件，不发布后台安装脚本。无需 npm install 或构建。
+
+进入 Actions → **Deploy homepage to GitHub Pages**，点击 **Run workflow**，选择 `main` 并运行。以后每次推送 `main` 会自动发布；首次切换发布来源后请手动运行一次。绿色成功后可在部署输出或 Settings → Pages 查看正式地址。
 
 主站地址形如：
 

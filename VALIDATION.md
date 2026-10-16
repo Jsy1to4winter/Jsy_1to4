@@ -27,3 +27,7 @@
 5. 用匿名及另一份资料的账号直接测试数据库和 Storage 写操作，确认被拒绝。不要仅凭按钮隐藏判断权限安全。
 
 前端仅含 Publishable Key；后端依赖平台注入的服务密钥，未将 Secret Key、service_role Key 或任何实际密码写入公开文件。
+
+## GitHub Pages 发布工作流
+
+新增 `.github/workflows/pages.yml`：支持 main 推送和手动运行，仅打包 index.html、cloud-sync.js、profile-access.js。需要在仓库 Settings → Pages 将 Source 切换为 GitHub Actions；实际线上部署结果仍需在 Actions 中确认。
