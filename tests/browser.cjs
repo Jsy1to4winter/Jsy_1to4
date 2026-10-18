@@ -64,10 +64,12 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     await page.fill('#lockEmail','admin@example.com');await page.fill('#lockPassword','password');await page.click('#unlockSubmit');
     await page.waitForSelector('body.profile-unlocked');
     await page.click('#editBtn');
+    assert.equal(await page.locator('[data-k="summary"]').count(),0);assert.equal(await page.locator('#publishVisitor').count(),1);
+    for(const [i,title] of [[1,'我的收藏'],[2,'一路走来'],[3,'联系方式']]) await page.locator(`[data-i="${i}"][data-k="title"]`).fill(title);
     await page.fill('#nameInput','同步昵称');await page.fill('#bioInput','完整个人简介');await page.fill('#bubbleInput','你好呀');
     for(const type of ['gallery','experience','contact']) await page.fill('[data-preface="'+type+'"]','同步'+type);
     await page.click('#saveBtn');await waitSaved(page);
-    assert.equal(row.profile_data.profile.name,'同步昵称');assert.equal(row.profile_data.sectionIntros.contact,'同步contact');
+    assert.equal(row.profile_data.profile.cards[1].summary,'兴趣');assert.equal(row.profile_data.profile.name,'同步昵称');assert.equal(row.profile_data.sectionIntros.contact,'同步contact');
     assert.equal(await page.locator('#avatarBubble').textContent(),'你好呀');
     assert.equal(row.profile_data.profile.avatar,legacyAvatar);assert.equal(objects.size,0);failUpload=false;
     await page.click('#editBtn');await page.click('[data-tool="intro"]');
@@ -131,6 +133,7 @@ async function waitSaved(page) {await page.waitForFunction(()=>!cloudBusy);}
     const visitor=await context(browser), vp=await visitor.newPage();await vp.goto('http://127.0.0.1:8000');await vp.waitForFunction(()=>cloudReady);
     assert.equal(await vp.locator('#displayName').textContent(),'同步昵称');assert.equal(await vp.locator('#homeIntroBody').textContent(),'同步关于我');assert.equal(await vp.locator('#commentWall .comment-item').count(),1);
     assert(!await vp.locator('body').evaluate(x=>x.classList.contains('profile-unlocked')));
+    for(const [i,title] of [[1,'我的收藏'],[2,'一路走来'],[3,'联系方式']]) {assert.equal(await vp.locator('#cards .card h3').nth(i).textContent(),title);await vp.locator('#cards .card').nth(i).click();assert.equal(await vp.locator('#detailTitle').textContent(),title);await vp.locator('#detailClose').click();}
     const beforeWrites=writes;await vp.evaluate(()=>cloudAction(()=>{data.name='visitor attempt';}));assert.equal(writes,beforeWrites);
     await vp.locator('#cards .card').nth(2).click();await vp.waitForSelector('.editable-preface p');assert.equal(await vp.locator('.editable-preface p').textContent(),'同步experience');
     const downloadWait=page.waitForEvent('download');await page.click('#publishVisitor');const download=await downloadWait;

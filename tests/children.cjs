@@ -88,6 +88,8 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   await p1.click('#editBtn');await p1.fill('#lockPassword','two-password-123');await p1.click('#unlockSubmit');await p1.waitForFunction(()=>document.getElementById('lockError').textContent.includes('密码不正确'));assert(!await p1.locator('body').evaluate(b=>b.classList.contains('profile-unlocked')));
   await p1.fill('#lockPassword','one-password-123');await p1.click('#unlockSubmit');await p1.waitForSelector('body.profile-unlocked');await p1.click('#editBtn');
   assert(await p1.locator('#manageChildLinks').isHidden());assert.equal(await p1.getByRole('button',{name:'导入旧浏览器文字',exact:true}).count(),0);
+  assert.equal(await p1.locator('[data-k="summary"]').count(),0);assert.equal(await p1.locator('#publishVisitor').count(),0);
+  for(const [i,title] of [[1,'旅行相册'],[2,'成长记录'],[3,'找到我']]) await p1.locator(`[data-i="${i}"][data-k="title"]`).fill(title);
   await p1.fill('#nameInput','一号专属资料');await p1.fill('#bioInput','一号的简介');await p1.fill('[data-preface="gallery"]','一号相册');await p1.click('#saveBtn');await saved(p1);
   await p1.locator('#avatarFile').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});await saved(p1);
   await p1.locator('#musicInput').setInputFiles({name:'bad.mp3',mimeType:'audio/mpeg',buffer:Buffer.from('not music')});await saved(p1);assert(!profiles.get('person_one').profile_data.media.some(x=>x.type==='music'));
@@ -108,6 +110,7 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   // A fresh public visitor sees latest text, image, gallery and playable music.
   const visitorCtx=await context({viewport:{width:390,height:844},isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0'}),vp=await open(visitorCtx,'person_one');
   assert.equal(await vp.locator('#displayName').textContent(),'一号专属资料');assert.equal(await vp.locator('#displayBio').textContent(),'一号的简介');await vp.waitForFunction(()=>document.getElementById('profileAudio').readyState>=2);
+  for(const [i,title] of [[1,'旅行相册'],[2,'成长记录'],[3,'找到我']]) {assert.equal(await vp.locator('#cards .card h3').nth(i).textContent(),title);await vp.locator('#cards .card').nth(i).click();assert.equal(await vp.locator('#detailTitle').textContent(),title);await vp.locator('#detailClose').click();}
   assert(await vp.evaluate(()=>audio.src.startsWith('blob:')));
   assert.equal(await vp.evaluate(async()=>(await (await fetch(audio.src)).blob()).type),'audio/mp4');
   await vp.locator('#cards .card').nth(1).click();await vp.waitForSelector('.gallery-tile img');await vp.locator('.gallery-tile img').click();assert(await vp.locator('#imageViewer').evaluate(x=>x.classList.contains('open')));
@@ -131,11 +134,9 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   const newPassword=(await rp.inputValue('#distributionResult')).split('编辑密码：')[1].split('\n')[0];assert.notEqual(newPassword,'one-password-123');assert.notEqual(profiles.get('person_one').owner_id,firstUser);assert.equal(objects.size,oldObjects);assert.equal(profiles.get('person_one').profile_data.profile.name,'一号专属资料');
   await p1.click('#detailClose');await p1.fill('#nameInput','旧会话攻击');await p1.click('#saveBtn');await saved(p1);assert.equal(profiles.get('person_one').profile_data.profile.name,'一号专属资料');
   const newCtx=await context(),np=await open(newCtx,'person_one');await unlock(np,newPassword);await np.fill('#nameInput','重置后仍可编辑');await np.click('#saveBtn');await saved(np);assert.equal(profiles.get('person_one').profile_data.profile.name,'重置后仍可编辑');
-  // Export keeps the child namespace and removes password/admin service scripts.
-  await np.click('#editBtn');const [download]=await Promise.all([np.waitForEvent('download'),np.click('#publishVisitor')]);
-  const snapshot=fs.readFileSync(await download.path(),'utf8');assert(!snapshot.includes('profile-access.js'));assert(snapshot.includes('data:audio/mp4;base64,'));
-  const sp=await newCtx.newPage();await sp.route('**/child-snapshot.html',r=>r.fulfill({contentType:'text/html',body:snapshot}));await sp.goto('http://127.0.0.1:8000/child-snapshot.html');
-  assert.equal(await sp.locator('#displayName').textContent(),'重置后仍可编辑');await sp.close();
+  // Child editors share the live link and have no visitor HTML export controls.
+  await np.click('#editBtn');assert.equal(await np.locator('#publishVisitor').count(),0);
+  assert.equal(await np.getByText('导出只读快照（不会自动更新）。公开主页请部署完整项目，持续读取云端最新内容。',{exact:true}).count(),0);
   // Missing child must not display the main profile's local draft.
   const missing=await firstCtx.newPage();await missing.goto('http://127.0.0.1:8000/?profile=missing_child');await missing.waitForFunction(()=>document.getElementById('toast').textContent.includes('不存在'));
   assert.notEqual(await missing.locator('#displayName').textContent(),'MAIN_LOCAL_SENTINEL');
@@ -144,6 +145,6 @@ const passwordClient={auth:{async signInWithPassword({email,password}){const use
   assert(profiles.get('person_two').deleted_at);assert(editors.get('person_two').purged_at);assert.deepEqual(profiles.get('person_two').profile_data,{});assert(![...objects.keys()].some(path=>path.startsWith('person_two/')));assert.deepEqual([...objects.keys()].filter(path=>path.startsWith('person_one/')),retainedFiles);
   const gone=await visitorCtx.newPage();await gone.goto('http://127.0.0.1:8000/?profile=person_two');await gone.waitForFunction(()=>document.getElementById('toast').textContent.includes('不存在或已删除'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: root creates two links; child MP3 waits for file-picker refresh; password-only child login; wrong-link password rejected; per-link sessions in one browser; isolated text/avatar/gallery/MP3 uploads; public playback/preview; root resets password; old session revoked; data/files preserved; child snapshot export; missing-link local draft isolation; public reads without SDK; one-tap manual music in mobile emulation; visible read-error retry; MIME inference/invalid-file rejection; mislabeled M4A upload rejected before Storage write; legacy M4A with incorrect MP3 headers plays via correctly typed Blob and exports audio/mp4; deletion with scoped file cleanup. Real SDK + actual handler + mock services.');
+  console.log('PASS: root creates two links; child MP3 waits for file-picker refresh; password-only child login; wrong-link password rejected; per-link sessions in one browser; isolated text/avatar/gallery/MP3 uploads; public playback/preview; root resets password; old session revoked; data/files preserved; child HTML export absent; missing-link local draft isolation; public reads without SDK; one-tap manual music in mobile emulation; visible read-error retry; MIME inference/invalid-file rejection; mislabeled M4A upload rejected before Storage write; legacy M4A with incorrect MP3 headers plays via correctly typed Blob; deletion with scoped file cleanup. Real SDK + actual handler + mock services.');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1});
