@@ -334,26 +334,12 @@ galleryFile.onchange = e => {
     for(const file of files) cloudMedia.push({id: crypto.randomUUID(), type: section.type, name: file.name, url: await uploadFile(file)});
   }, () => showSection(section));
 };
-$('importFile').onchange = async e => {
-  const file = e.target.files?.[0]; e.target.value = ''; if(!file) return;
-  void cloudAction(async () => {
-    const obj = JSON.parse(await file.text());
-    const profile = obj.profile || obj;
-    if (!Array.isArray(profile.cards) || profile.cards.length !== defaults.cards.length || !Array.isArray(profile.tags)) throw Error('资料文件格式不正确');
-    data = {...structuredClone(defaults), ...profile};
-    if (obj.about) about = {...aboutFallback, ...obj.about};
-    if (obj.sectionIntros) sectionIntros = {...obj.sectionIntros};
-    if (Array.isArray(obj.comments)) presetComments = obj.comments;
-    if (Array.isArray(obj.media)) cloudMedia = obj.media;
-  }, openEditor);
-};
 function tool(text, action) { const button = document.createElement('button'); button.type = 'button'; button.className = 'v16-tool cloud-admin'; button.textContent = text; button.onclick = action; $('modal').querySelector('.v16-tool-grid').append(button); }
 
 function exportJson(value, filename) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], {type: 'application/json'}));
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-$('exportBtn').onclick = () => exportJson(documentData(), '个人主页云端资料.json');
 if (!IS_CHILD_PROFILE) tool('备份旧浏览器文字', () => exportJson(legacyText, 'V19旧浏览器文字备份.json'));
 if (!IS_CHILD_PROFILE) tool('导入旧浏览器文字', () => {
   if (!confirm('仅在原先编辑 V19 的浏览器使用：这会用此浏览器原有文字和留言替换当前云端文字。请先备份，继续？')) return;
@@ -364,7 +350,7 @@ tool('更换关于我图片', () => aboutFile.click());
 tool('删除关于我图片', () => void cloudAction(() => {about.image = '';}));
 tool('删除音乐', () => void cloudAction(() => {cloudMedia = cloudMedia.filter(x => x.type !== 'music');}, loadMusic));
 if (!IS_CHILD_PROFILE) tool('上传旧浏览器媒体', () => {
-  if(!confirm('将此浏览器的旧相册和音乐上传到云端。请先导出资料备份，继续？')) return;
+  if(!confirm('将此浏览器的旧相册和音乐上传到云端。请先备份资料，继续？')) return;
   void cloudAction(async () => {
     for(const type of ['gallery','experience','contact','music']) {
       const files = await localMediaAll(type);
